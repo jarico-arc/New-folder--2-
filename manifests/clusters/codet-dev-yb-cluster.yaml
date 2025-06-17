@@ -1,0 +1,54 @@
+apiVersion: yugabytedb.yugabyte.com/v1alpha1
+kind: YBCluster
+metadata:
+  name: codet-dev-yb
+  namespace: codet-dev-yb
+  labels:
+    environment: development
+    app: yugabytedb
+spec:
+  # Replication factor for data redundancy
+  replicationFactor: 3
+
+  # Domain for the cluster
+  domain: cluster.local
+
+  # Master Node Configuration (the brains of the DB)
+  master:
+    replicas: 3 # Recommended for production-like environments for fault tolerance
+    storage:
+      size: 10Gi # Modest storage for a dev master
+      storageClass: standard-rwo # GKE standard persistent disk
+    resources:
+      requests:
+        cpu: "1"
+        memory: 2Gi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    # Enable authentication and TLS
+    enableAuth: true
+    tls:
+      enabled: true
+
+  # T-Server Node Configuration (handles the actual data)
+  tserver:
+    replicas: 3 # Start with 3 nodes
+    storage:
+      size: 50Gi # Adjust based on expected data volume
+      storageClass: standard-rwo
+    resources:
+      requests:
+        cpu: "2"
+        memory: 4Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    # Enable authentication and TLS
+    enableAuth: true
+    tls:
+      enabled: true
+
+  # Enable monitoring
+  monitoring:
+    enabled: true 

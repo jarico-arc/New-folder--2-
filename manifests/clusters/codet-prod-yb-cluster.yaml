@@ -1,0 +1,72 @@
+apiVersion: yugabytedb.yugabyte.com/v1alpha1
+kind: YBCluster
+metadata:
+  name: codet-prod-yb
+  namespace: codet-prod-yb
+  labels:
+    environment: production
+    app: yugabytedb
+spec:
+  # Replication factor for data redundancy
+  replicationFactor: 3
+
+  # Domain for the cluster
+  domain: cluster.local
+
+  # Master Node Configuration (the brains of the DB)
+  master:
+    replicas: 3 # Recommended for production environments for fault tolerance
+    storage:
+      size: 50Gi # Production-grade storage for master
+      storageClass: ssd-retain # Use SSD for better performance and retention policy
+    resources:
+      requests:
+        cpu: "2"
+        memory: 4Gi
+      limits:
+        cpu: "3"
+        memory: 6Gi
+    # Enable authentication and TLS
+    enableAuth: true
+    tls:
+      enabled: true
+    # Production-specific configurations
+    podAnnotations:
+      cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+
+  # T-Server Node Configuration (handles the actual data)
+  tserver:
+    replicas: 5 # Start with 5 nodes for production
+    storage:
+      size: 500Gi # Large storage for production workloads
+      storageClass: ssd-retain # Use SSD for better performance
+    resources:
+      requests:
+        cpu: "4"
+        memory: 8Gi
+      limits:
+        cpu: "6"
+        memory: 12Gi
+    # Enable authentication and TLS
+    enableAuth: true
+    tls:
+      enabled: true
+    # Production-specific configurations
+    podAnnotations:
+      cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+
+  # Enable monitoring
+  monitoring:
+    enabled: true
+
+  # Production-specific settings
+  serviceMonitor:
+    enabled: true
+  
+  # Resource quotas and limits
+  resourceQuota:
+    enabled: true
+    hard:
+      requests.cpu: "30"
+      requests.memory: "60Gi"
+      persistentvolumeclaims: "10" 

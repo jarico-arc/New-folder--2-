@@ -1,0 +1,27 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codet-dev-yb
+  labels:
+    environment: development
+    app: yugabytedb
+    tier: database
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codet-staging-yb
+  labels:
+    environment: staging
+    app: yugabytedb
+    tier: database
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codet-prod-yb
+  labels:
+    environment: production
+    app: yugabytedb
+    tier: database 

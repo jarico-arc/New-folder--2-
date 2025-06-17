@@ -1,0 +1,54 @@
+apiVersion: yugabytedb.yugabyte.com/v1alpha1
+kind: YBCluster
+metadata:
+  name: codet-staging-yb
+  namespace: codet-staging-yb
+  labels:
+    environment: staging
+    app: yugabytedb
+spec:
+  # Replication factor for data redundancy
+  replicationFactor: 3
+
+  # Domain for the cluster
+  domain: cluster.local
+
+  # Master Node Configuration (the brains of the DB)
+  master:
+    replicas: 3 # Recommended for production-like environments for fault tolerance
+    storage:
+      size: 20Gi # More storage for staging
+      storageClass: standard-rwo # GKE standard persistent disk
+    resources:
+      requests:
+        cpu: "1.5"
+        memory: 3Gi
+      limits:
+        cpu: "2"
+        memory: 4Gi
+    # Enable authentication and TLS
+    enableAuth: true
+    tls:
+      enabled: true
+
+  # T-Server Node Configuration (handles the actual data)
+  tserver:
+    replicas: 3 # Start with 3 nodes
+    storage:
+      size: 100Gi # More storage for staging workloads
+      storageClass: standard-rwo
+    resources:
+      requests:
+        cpu: "3"
+        memory: 6Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+    # Enable authentication and TLS
+    enableAuth: true
+    tls:
+      enabled: true
+
+  # Enable monitoring
+  monitoring:
+    enabled: true 
