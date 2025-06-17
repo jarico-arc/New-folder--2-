@@ -45,6 +45,26 @@ setup_environment_rbac() {
     echo "   App Role: $app_role"
     echo "   Admin Role: $admin_role"
     
+    # Read credentials from Kubernetes secrets
+    local secret_name="codet-${environment}-db-credentials"
+    
+    if ! kubectl get secret "$secret_name" -n "$namespace" &>/dev/null; then
+        echo "❌ Kubernetes secret $secret_name not found in namespace $namespace"
+        echo "Please run scripts/generate-secrets.sh first"
+        return 1
+    fi
+    
+    # Extract credentials from Kubernetes secret
+    local admin_password=$(kubectl get secret "$secret_name" -n "$namespace" -o jsonpath='{.data.admin-password}' | base64 -d)
+    local app_password=$(kubectl get secret "$secret_name" -n "$namespace" -o jsonpath='{.data.app-password}' | base64 -d)
+    
+    if [ -z "$admin_password" ] || [ -z "$app_password" ]; then
+        echo "❌ Failed to retrieve passwords from Kubernetes secret"
+        return 1
+    fi
+    
+    echo "🔑 Retrieved credentials from Kubernetes secret"
+    
     # Check if cluster is ready
     if ! check_cluster_ready $namespace $cluster_name; then
         echo "⚠️  Skipping $environment - cluster not ready"
@@ -80,10 +100,10 @@ setup_environment_rbac() {
 -- Generated on $(date)
 
 -- Create admin role for $environment
-CREATE ROLE $admin_role WITH LOGIN PASSWORD 'admin-${environment}-$(date +%s)' SUPERUSER;
+CREATE ROLE $admin_role WITH LOGIN PASSWORD '$admin_password' SUPERUSER;
 
 -- Create application role for $environment (restricted access)
-CREATE ROLE $app_role WITH LOGIN PASSWORD 'app-${environment}-$(date +%s)';
+CREATE ROLE $app_role WITH LOGIN PASSWORD '$app_password';
 
 -- Create application database if it doesn't exist
 CREATE DATABASE codet_${environment} OWNER $admin_role;
@@ -222,19 +242,26 @@ EOF
     if psql -h localhost -p 5433 -U yugabyte -d yugabyte -f $temp_sql; then
         echo "✅ RBAC setup completed for $environment"
         
-        # Save the credentials securely
-        local creds_file="credentials/codet-${environment}-credentials.txt"
+        # Create reference file for credentials (passwords are in K8s secrets)
+        local creds_file="credentials/codet-${environment}-rbac-info.txt"
         mkdir -p credentials
         
-        echo "# YugabyteDB Credentials for $environment Environment" > $creds_file
+        echo "# YugabyteDB RBAC Configuration for $environment Environment" > $creds_file
         echo "# Generated on $(date)" >> $creds_file
-        echo "# Store these credentials securely!" >> $creds_file
+        echo "# Passwords are stored in Kubernetes secrets" >> $creds_file
         echo "" >> $creds_file
         echo "Database: codet_${environment}" >> $creds_file
         echo "Admin Role: $admin_role" >> $creds_file
         echo "Application Role: $app_role" >> $creds_file
+        echo "Kubernetes Secret: $secret_name" >> $creds_file
+        echo "Namespace: $namespace" >> $creds_file
+        echo "" >> $creds_file
+        echo "Get passwords from Kubernetes:" >> $creds_file
+        echo "kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.admin-password}' | base64 -d" >> $creds_file
+        echo "kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.app-password}' | base64 -d" >> $creds_file
         echo "" >> $creds_file
         echo "Connection examples:" >> $creds_file
+        echo "export APP_PASSWORD=\$(kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.app-password}' | base64 -d)" >> $creds_file
         echo "psql -h <host> -p 5433 -U $app_role -d codet_${environment}" >> $creds_file
         echo "" >> $creds_file
         echo "Available functions for $app_role:" >> $creds_file
@@ -243,7 +270,7 @@ EOF
         echo "- app_schema.update_user_email(user_id, new_email)" >> $creds_file
         
         chmod 600 $creds_file
-        echo "💾 Credentials saved to $creds_file"
+        echo "💾 RBAC information saved to $creds_file"
     else
         echo "❌ RBAC setup failed for $environment"
     fi

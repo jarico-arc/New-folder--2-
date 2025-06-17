@@ -7,6 +7,9 @@ metadata:
     environment: staging
     app: yugabytedb
 spec:
+  image:
+    repository: yugabytedb/yugabyte
+    tag: latest
   # Replication factor for data redundancy
   replicationFactor: 3
 
@@ -26,6 +29,28 @@ spec:
       limits:
         cpu: "2"
         memory: 4Gi
+    # Anti-affinity to spread masters across nodes
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - yb-master
+            topologyKey: kubernetes.io/hostname
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - yb-master
+            topologyKey: topology.kubernetes.io/zone
     # Enable authentication and TLS
     enableAuth: true
     tls:
@@ -44,6 +69,28 @@ spec:
       limits:
         cpu: "4"
         memory: 8Gi
+    # Anti-affinity to spread tservers across nodes
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - yb-tserver
+            topologyKey: kubernetes.io/hostname
+        - weight: 50
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - yb-tserver
+            topologyKey: topology.kubernetes.io/zone
     # Enable authentication and TLS
     enableAuth: true
     tls:

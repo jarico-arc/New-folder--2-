@@ -1,0 +1,230 @@
+# NetworkPolicies for YugabyteDB Security
+# Restricts database access to only authorized application pods
+
+---
+# Development Environment NetworkPolicies
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-dev-yb-network-policy
+  namespace: codet-dev-yb
+spec:
+  podSelector:
+    matchLabels:
+      app: yb-tserver
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow access from application pods in the same namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-dev-yb
+    ports:
+    - protocol: TCP
+      port: 5433  # YSQL port
+    - protocol: TCP
+      port: 9042  # YCQL port
+  # Allow access from monitoring namespace (if exists)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9000  # Metrics port
+  # Allow inter-cluster communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+  egress:
+  # Allow outbound to masters and tservers
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Development Master NetworkPolicy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-dev-yb-master-network-policy
+  namespace: codet-dev-yb
+spec:
+  podSelector:
+    matchLabels:
+      app: yb-master
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow access from tservers
+  - from:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+  # Allow access from other masters
+  - from:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+  # Allow access from monitoring
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 7000  # Web UI port
+  egress:
+  # Allow outbound to masters and tservers
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Staging Environment NetworkPolicies
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-staging-yb-network-policy
+  namespace: codet-staging-yb
+spec:
+  podSelector:
+    matchLabels:
+      app: yb-tserver
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-staging-yb
+    ports:
+    - protocol: TCP
+      port: 5433
+    - protocol: TCP
+      port: 9042
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9000
+  - from:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Production Environment NetworkPolicies (Stricter)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-prod-yb-network-policy
+  namespace: codet-prod-yb
+spec:
+  podSelector:
+    matchLabels:
+      app: yb-tserver
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Only allow access from specific application labels
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-prod-app  # Production application namespace
+      podSelector:
+        matchLabels:
+          role: database-client
+    ports:
+    - protocol: TCP
+      port: 5433
+  # Allow monitoring access
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9000
+  # Allow inter-cluster communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+  egress:
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Default deny-all policy for production namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-prod-yb-default-deny
+  namespace: codet-prod-yb
+spec:
+  podSelector: {}  # Apply to all pods in namespace
+  policyTypes:
+  - Ingress
+  - Egress
+  # No ingress or egress rules = deny all (except what's explicitly allowed by other policies) 

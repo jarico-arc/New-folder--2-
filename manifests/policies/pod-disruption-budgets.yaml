@@ -1,0 +1,83 @@
+# PodDisruptionBudgets for YugabyteDB
+# Ensures quorum is maintained during node drains, cluster upgrades, etc.
+
+---
+# Development Environment PDBs
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-dev-yb-master-pdb
+  namespace: codet-dev-yb
+spec:
+  minAvailable: 2  # Keep at least 2 masters available (out of 3)
+  selector:
+    matchLabels:
+      app: yb-master
+      release: codet-dev-yb
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-dev-yb-tserver-pdb
+  namespace: codet-dev-yb
+spec:
+  minAvailable: 2  # Keep at least 2 tservers available (out of 3)
+  selector:
+    matchLabels:
+      app: yb-tserver
+      release: codet-dev-yb
+
+---
+# Staging Environment PDBs
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-staging-yb-master-pdb
+  namespace: codet-staging-yb
+spec:
+  minAvailable: 2  # Keep at least 2 masters available (out of 3)
+  selector:
+    matchLabels:
+      app: yb-master
+      release: codet-staging-yb
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-staging-yb-tserver-pdb
+  namespace: codet-staging-yb
+spec:
+  minAvailable: 2  # Keep at least 2 tservers available (out of 3)
+  selector:
+    matchLabels:
+      app: yb-tserver
+      release: codet-staging-yb
+
+---
+# Production Environment PDBs
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-prod-yb-master-pdb
+  namespace: codet-prod-yb
+spec:
+  minAvailable: 2  # Keep at least 2 masters available (out of 3)
+  selector:
+    matchLabels:
+      app: yb-master
+      release: codet-prod-yb
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-prod-yb-tserver-pdb
+  namespace: codet-prod-yb
+spec:
+  minAvailable: 3  # Keep at least 3 tservers available (out of 5) for production
+  selector:
+    matchLabels:
+      app: yb-tserver
+      release: codet-prod-yb 

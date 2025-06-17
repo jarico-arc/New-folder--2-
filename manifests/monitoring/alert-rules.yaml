@@ -1,0 +1,234 @@
+# AlertManager Rules for YugabyteDB
+# Critical alerts for database health and performance
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alert-rules
+  namespace: monitoring
+data:
+  yugabytedb-alerts.yml: |
+    groups:
+    - name: yugabytedb.rules
+      rules:
+      
+      # Master Node Alerts
+      - alert: YugabyteMasterDown
+        expr: up{job="yugabytedb-master"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: master
+        annotations:
+          summary: "YugabyteDB Master node is down"
+          description: "Master node {{$labels.pod}} in namespace {{$labels.namespace}} has been down for more than 1 minute."
+      
+      - alert: YugabyteMasterQuorumLoss
+        expr: count(up{job="yugabytedb-master"} == 1) by (namespace) < 2
+        for: 30s
+        labels:
+          severity: critical
+          component: master
+        annotations:
+          summary: "YugabyteDB Master quorum lost"
+          description: "Less than 2 master nodes are available in namespace {{$labels.namespace}}. Cluster may become unavailable."
+      
+      # TServer Node Alerts
+      - alert: YugabyteTServerDown
+        expr: up{job="yugabytedb-tserver"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          component: tserver
+        annotations:
+          summary: "YugabyteDB TServer node is down"
+          description: "TServer node {{$labels.pod}} in namespace {{$labels.namespace}} has been down for more than 2 minutes."
+      
+      - alert: YugabyteTServerMajorityDown
+        expr: count(up{job="yugabytedb-tserver"} == 1) by (namespace) < count(up{job="yugabytedb-tserver"}) by (namespace) / 2
+        for: 1m
+        labels:
+          severity: critical
+          component: tserver
+        annotations:
+          summary: "Majority of YugabyteDB TServer nodes are down"
+          description: "More than half of TServer nodes are down in namespace {{$labels.namespace}}."
+      
+      # Performance Alerts
+      - alert: YugabyteHighLatency
+        expr: histogram_quantile(0.95, rate(yb_tserver_ysql_operation_latency_bucket[5m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "High YSQL operation latency"
+          description: "95th percentile latency is {{$value}}ms in namespace {{$labels.namespace}}, pod {{$labels.pod}}."
+      
+      - alert: YugabyteHighConnectionCount
+        expr: yb_node_connections > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: connections
+        annotations:
+          summary: "High connection count on YugabyteDB"
+          description: "Connection count is {{$value}} on pod {{$labels.pod}} in namespace {{$labels.namespace}}."
+      
+      # Storage Alerts
+      - alert: YugabyteHighDiskUsage
+        expr: (yb_disk_usage_bytes / yb_disk_capacity_bytes) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "High disk usage on YugabyteDB node"
+          description: "Disk usage is {{$value}}% on pod {{$labels.pod}} in namespace {{$labels.namespace}}."
+      
+      - alert: YugabyteCriticalDiskUsage
+        expr: (yb_disk_usage_bytes / yb_disk_capacity_bytes) * 100 > 90
+        for: 2m
+        labels:
+          severity: critical
+          component: storage
+        annotations:
+          summary: "Critical disk usage on YugabyteDB node"
+          description: "Disk usage is {{$value}}% on pod {{$labels.pod}} in namespace {{$labels.namespace}}. Immediate action required."
+      
+      # Memory Alerts
+      - alert: YugabyteHighMemoryUsage
+        expr: (container_memory_usage_bytes{pod=~".*yb-.*"} / container_spec_memory_limit_bytes) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: memory
+        annotations:
+          summary: "High memory usage on YugabyteDB pod"
+          description: "Memory usage is {{$value}}% on pod {{$labels.pod}} in namespace {{$labels.namespace}}."
+      
+      # Production-specific alerts
+      - alert: YugabyteProductionTServerDown
+        expr: up{job="yugabytedb-tserver",namespace="codet-prod-yb"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          component: tserver
+          environment: production
+        annotations:
+          summary: "PRODUCTION: YugabyteDB TServer node is down"
+          description: "PRODUCTION TServer node {{$labels.pod}} has been down for more than 30 seconds."
+      
+      - alert: YugabyteProductionMasterDown
+        expr: up{job="yugabytedb-master",namespace="codet-prod-yb"} == 0
+        for: 15s
+        labels:
+          severity: critical
+          component: master
+          environment: production
+        annotations:
+          summary: "PRODUCTION: YugabyteDB Master node is down"
+          description: "PRODUCTION Master node {{$labels.pod}} has been down for more than 15 seconds."
+
+---
+# AlertManager Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'localhost:587'
+      smtp_from: 'alertmanager@codet.com'
+    
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'default'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'critical-alerts'
+      - match:
+          environment: production
+        receiver: 'production-alerts'
+    
+    receivers:
+    - name: 'default'
+      webhook_configs:
+      - url: 'http://localhost:5001/webhook'
+        send_resolved: true
+    
+    - name: 'critical-alerts'
+      email_configs:
+      - to: 'admin@codet.com'
+        subject: 'CRITICAL: YugabyteDB Alert'
+        body: |
+          Alert: {{ .GroupLabels.alertname }}
+          Description: {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+          
+    - name: 'production-alerts'
+      email_configs:
+      - to: 'oncall@codet.com'
+        subject: 'PRODUCTION: YugabyteDB Alert'
+        body: |
+          PRODUCTION ALERT
+          Alert: {{ .GroupLabels.alertname }}
+          Description: {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
+      webhook_configs:
+      - url: 'http://localhost:5001/webhook'
+        send_resolved: true
+
+---
+# AlertManager Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+      - name: alertmanager
+        image: prom/alertmanager:latest
+        ports:
+        - containerPort: 9093
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/alertmanager
+        args:
+        - '--config.file=/etc/alertmanager/alertmanager.yml'
+        - '--storage.path=/alertmanager'
+        - '--web.external-url=http://localhost:9093'
+      volumes:
+      - name: config-volume
+        configMap:
+          name: alertmanager-config
+
+---
+# AlertManager Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: monitoring
+spec:
+  selector:
+    app: alertmanager
+  ports:
+  - port: 9093
+    targetPort: 9093
+  type: ClusterIP 
