@@ -1,12 +1,13 @@
 -- YugabyteDB RBAC Setup Template
 -- This file contains the SQL commands to set up role-based access control
 -- Replace {ENVIRONMENT} with your actual environment name (dev, staging, prod)
+-- WARNING: This is a template file. Use ./scripts/setup-database-rbac.sh for automated deployment.
 
 -- Create admin role for environment management
-CREATE ROLE codet_{ENVIRONMENT}_admin WITH LOGIN PASSWORD 'your-secure-admin-password' SUPERUSER;
+CREATE ROLE codet_{ENVIRONMENT}_admin WITH LOGIN PASSWORD 'REPLACE_WITH_SECURE_PASSWORD' SUPERUSER;
 
 -- Create application role with restricted access
-CREATE ROLE codet_{ENVIRONMENT}_app WITH LOGIN PASSWORD 'your-secure-app-password';
+CREATE ROLE codet_{ENVIRONMENT}_app WITH LOGIN PASSWORD 'REPLACE_WITH_SECURE_PASSWORD';
 
 -- Create application database
 CREATE DATABASE codet_{ENVIRONMENT} OWNER codet_{ENVIRONMENT}_admin;

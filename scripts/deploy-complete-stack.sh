@@ -28,19 +28,41 @@ echo "🔧 Installing YugabyteDB Operator..."
 
 # Generate secrets
 echo "🔐 Generating secure credentials..."
-./scripts/generate-secrets.sh
+if ! ./scripts/generate-secrets.sh; then
+    echo "❌ Failed to generate secrets"
+    exit 1
+fi
+
+# Verify secrets were created
+echo "🔍 Verifying secrets were created..."
+for env in dev staging prod; do
+    if ! kubectl get secret "codet-${env}-db-credentials" -n "codet-${env}-yb" &>/dev/null; then
+        echo "⚠️  Secret for $env environment not found, but continuing deployment..."
+    else
+        echo "✅ Secret for $env environment created successfully"
+    fi
+done
 
 # Deploy environments
 echo "🌍 Deploying environments..."
-./scripts/deploy-all-environments.sh
+if ! ./scripts/deploy-all-environments.sh; then
+    echo "❌ Failed to deploy environments"
+    exit 1
+fi
 
 # Deploy monitoring
 echo "📊 Deploying monitoring..."
-kubectl apply -f manifests/monitoring/
+if ! kubectl apply -f manifests/monitoring/; then
+    echo "❌ Failed to deploy monitoring stack"
+    exit 1
+fi
 
 # Apply security policies
 echo "🔒 Applying security policies..."
-kubectl apply -f manifests/policies/
+if ! kubectl apply -f manifests/policies/; then
+    echo "❌ Failed to apply security policies"
+    exit 1
+fi
 
 # Wait for clusters
 echo "⏳ Waiting for clusters to be ready..."
@@ -48,7 +70,10 @@ sleep 60
 
 # Setup RBAC
 echo "🔐 Setting up database RBAC..."
-./scripts/setup-database-rbac.sh
+if ! ./scripts/setup-database-rbac.sh; then
+    echo "⚠️  RBAC setup encountered issues, but deployment can continue"
+    echo "   You may need to run setup-database-rbac.sh manually later"
+fi
 
 echo "🎉 Deployment completed!"
 echo "Access Grafana: kubectl port-forward -n monitoring svc/grafana 3000:3000"

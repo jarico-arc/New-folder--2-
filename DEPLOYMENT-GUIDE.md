@@ -143,7 +143,7 @@ kubectl port-forward -n monitoring svc/grafana 3000:3000 &
 # Use Cloud Shell Web Preview on port 3000
 
 # Access Prometheus
-kubectl port-forward -n monitoring svc/prometheus-server 9090:9090 &
+kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
 ```
 
 ## Scaling Operations
@@ -195,11 +195,13 @@ After deployment, check the `credentials/` directory for:
 
 ## Resource Configuration Summary
 
-| Environment | Master Nodes | TServer Nodes | Storage/Node | CPU/Node | Memory/Node |
-|-------------|--------------|---------------|--------------|----------|-------------|
-| Development | 3            | 3             | 50Gi         | 2 CPU    | 4Gi         |
-| Staging     | 3            | 3             | 100Gi        | 3-4 CPU  | 6-8Gi       |
-| Production  | 3            | 5             | 500Gi        | 4-6 CPU  | 8-12Gi      |
+| Environment | Master Nodes | TServer Nodes | Master Storage | TServer Storage | CPU/Node | Memory/Node |
+|-------------|--------------|---------------|----------------|-----------------|----------|-------------|
+| Development | 1            | 1             | 5Gi            | 10Gi            | 0.5-1 CPU | 1-2Gi      |
+| Staging     | 1            | 1             | 10Gi           | 20Gi            | 1-2 CPU   | 2-4Gi      |
+| Production  | 3            | 3             | 50Gi           | 200Gi           | 2-4 CPU   | 4-8Gi      |
+
+**Note**: Dev and Staging use minimal resources for cost optimization. Production uses full replication for high availability.
 
 ## Security Implementation
 
