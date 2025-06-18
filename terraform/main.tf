@@ -254,22 +254,22 @@ resource "google_container_cluster" "yugabyte_cluster" {
     }
   }
 
-  # Maintenance policy
-  maintenance_policy {
-    recurring_window {
-      start_time = local.maintenance_start_time
-      end_time   = local.maintenance_end_time
-      recurrence = "FREQ=WEEKLY;BYDAY=SA"
-    }
-  }
+  # Maintenance policy (disabled for deployment simplicity)
+  # maintenance_policy {
+  #   recurring_window {
+  #     start_time = local.maintenance_start_time
+  #     end_time   = local.maintenance_end_time
+  #     recurrence = "FREQ=WEEKLY;BYDAY=SA"
+  #   }
+  # }
 
-  # Monitoring and logging
+  # Monitoring and logging (minimal for cost optimization)
   monitoring_config {
-    enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"]
+    enable_components = ["SYSTEM_COMPONENTS"]
   }
 
   logging_config {
-    enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"]
+    enable_components = ["SYSTEM_COMPONENTS"]
   }
 
   depends_on = [
