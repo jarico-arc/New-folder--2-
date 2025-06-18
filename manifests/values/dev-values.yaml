@@ -13,30 +13,30 @@ replicas:
 # Disable load balancer for cost savings
 enableLoadBalancer: false
 
-# Master configuration
+# Master configuration - VERY minimal for small cluster
 resource:
   master:
     requests:
+      cpu: "0.2"
+      memory: "512Mi"
+    limits:
       cpu: "0.5"
       memory: "1Gi"
-    limits:
-      cpu: "1"
-      memory: "2Gi"
   tserver:
     requests:
-      cpu: "1"
-      memory: "2Gi"
+      cpu: "0.2"
+      memory: "512Mi"
     limits:
-      cpu: "1"
-      memory: "2Gi"
+      cpu: "0.5"
+      memory: "1Gi"
 
-# Storage configuration
+# Storage configuration - smaller sizes
 storage:
   master:
-    size: "10Gi"
+    size: "5Gi"
     storageClass: "pd-standard"
   tserver:
-    size: "20Gi"
+    size: "10Gi"
     storageClass: "pd-standard"
 
 # DISABLED: Authentication and TLS for cost savings
@@ -53,50 +53,24 @@ prometheus:
 serviceMonitor:
   enabled: false
 
-# Node affinity for cost optimization
+# Remove node selector and tolerations for simple scheduling
 nodeSelector: {}
 
-affinity:
-  master:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        preference:
-          matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values:
-            - e2-micro
-            - e2-small
-  tserver:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        preference:
-          matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values:
-          - e2-micro
-          - e2-small
-      - weight: 80
-        preference:
-          matchExpressions:
-          - key: node-pool
-            operator: In
-            values:
-            - yugabyte-tserver
+# Remove complex affinity rules
+affinity: {}
 
-# Add tolerations for dedicated tserver nodes
-tolerations:
-  tserver:
-  - key: "yugabyte.com/tserver"
-    operator: "Equal"
-    value: "true"
-    effect: "NoSchedule"
+# Remove tserver tolerations that might prevent scheduling
+tolerations: {}
 
 # Labels
 labels:
   environment: development
   app: yugabytedb
-  cost: minimal 
+  cost: minimal
+
+# Disable istio
+istio:
+  enabled: false
+
+# Disable partition tolerance for single node setup
+partition_tolerance: false 
