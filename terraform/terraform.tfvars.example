@@ -1,5 +1,5 @@
-# YugabyteDB Infrastructure - MINIMAL COST Configuration
-# Project: codet-dev-d5157 - Optimized for lowest possible cost
+# YugabyteDB Infrastructure - PRODUCTION-READY Configuration
+# Project: codet-dev-d5157 - Optimized for production reliability with cost consciousness
 
 project_id = "codet-dev-d5157"
 region     = "us-central1"
@@ -14,42 +14,43 @@ master_cidr   = "172.16.0.0/28"
 
 cluster_name = "codet-yugabyte-cluster"
 
-# EXTREME COST OPTIMIZATION
-min_cpu    = 1   # Absolute minimum
-max_cpu    = 6   # Keep very low
-min_memory = 4   # Absolute minimum
-max_memory = 12  # Keep very low
+# PRODUCTION-READY RESOURCE SETTINGS
+min_cpu    = 4    # Increased for production workloads
+max_cpu    = 40   # Increased to support 3x3 production setup
+min_memory = 16   # Increased for production workloads  
+max_memory = 80   # Increased to support production setup
 
-# Use smallest possible machine types
-general_machine_type = "e2-micro"      # FREE TIER eligible
+# Use production-appropriate machine types
+general_machine_type = "e2-standard-2"    # Upgraded for stability
 general_min_nodes   = 1
-general_max_nodes   = 2                # Minimal scaling
+general_max_nodes   = 6                   # Increased for production scaling
 
-tserver_machine_type = "e2-small"      # Smallest for database workload
+tserver_machine_type = "e2-standard-4"    # Upgraded for production performance
 tserver_min_nodes   = 0
-tserver_max_nodes   = 2                # Minimal scaling
+tserver_max_nodes   = 6                   # Increased for production scaling
 
-environment = "dev"  # Development for cost savings
+environment = "prod"  # Production environment
 
 labels = {
   managed-by = "terraform"
   project    = "yugabytedb-deployment"
   team       = "codet-dev"
-  cost       = "minimal"
+  cost       = "optimized"  # Changed from minimal
   owner      = "codet"
+  tier       = "production"
 }
 
-# MAXIMUM COST SAVINGS
-backup_enabled        = false          # No backups
-backup_retention_days = 1              # Minimal retention
+# PRODUCTION SETTINGS - Enable for reliability
+backup_enabled        = true             # Enable backups for production
+backup_retention_days = 30               # Extended retention
 
-monitoring_enabled = false             # No monitoring
-logging_enabled    = false             # No logging
+monitoring_enabled = true                # Enable monitoring for production
+logging_enabled    = true                # Enable logging for production
 
-enable_binary_authorization = false    # Disabled
-enable_network_policy      = false     # Disabled
-enable_private_nodes       = true      # Keep for security
-enable_workload_identity   = false     # Disabled
+enable_binary_authorization = true       # Enable for security
+enable_network_policy      = true        # Enable for security  
+enable_private_nodes       = true        # Keep for security
+enable_workload_identity   = true        # Enable for security
 
 maintenance_start_time = "2023-01-01T02:00:00Z"
 maintenance_end_time   = "2023-01-01T06:00:00Z"

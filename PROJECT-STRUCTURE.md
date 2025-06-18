@@ -39,7 +39,7 @@ This repository implements a comprehensive YugabyteDB multi-environment deployme
 
 ### 1. Infrastructure Layer (GKE + VPC)
 - **Private GKE Cluster**: Nodes without public IP addresses
-- **Private VPC**: `yugabyte-secure-vpc` with isolated networking
+- **Private VPC**: `yugabyte-tf-vpc` with isolated networking
 - **Subnetwork**: `yugabyte-subnet-us-central1` (10.0.1.0/24)
 - **Cloud NAT**: Enables outbound internet access
 - **Private Google Access**: Access to Google services without public IPs
@@ -92,26 +92,29 @@ This repository implements a comprehensive YugabyteDB multi-environment deployme
 
 ### Deployment Operations
 ```bash
-# Check prerequisites
-./scripts/setup-windows.ps1 -Action check
+# Deploy complete stack
+./scripts/deploy-complete-stack.sh
 
-# Install operator
-./scripts/setup-windows.ps1 -Action install
+# Install operator only
+./scripts/install-operator.sh
 
 # Deploy all environments
-./scripts/setup-windows.ps1 -Action deploy
+./scripts/deploy-all-environments.sh
 
 # Setup database security
-./scripts/setup-windows.ps1 -Action rbac
+./scripts/setup-database-rbac.sh dev
+./scripts/setup-database-rbac.sh staging
+./scripts/setup-database-rbac.sh prod
 ```
 
 ### Management Operations
 ```bash
 # Check deployment status
-./scripts/setup-windows.ps1 -Action status
+kubectl get ybcluster --all-namespaces
 
 # Scale a cluster
-./scripts/setup-windows.ps1 -Action scale
+./scripts/scale-cluster.sh dev 3
+./scripts/scale-cluster.sh staging 5
 
 # Monitor resources
 kubectl top pods -A | grep yb

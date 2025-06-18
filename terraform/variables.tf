@@ -54,39 +54,39 @@ variable "master_cidr" {
 variable "cluster_name" {
   description = "Name of the GKE cluster"
   type        = string
-  default     = "yugabyte-cluster"
+  default     = "codet-yugabyte-cluster"  # Match tfvars.example
 }
 
 # Cluster Autoscaling Limits
 variable "min_cpu" {
   description = "Minimum CPU cores for cluster autoscaling"
   type        = number
-  default     = 2
+  default     = 4
 }
 
 variable "max_cpu" {
   description = "Maximum CPU cores for cluster autoscaling"
   type        = number
-  default     = 20
+  default     = 40
 }
 
 variable "min_memory" {
   description = "Minimum memory in GB for cluster autoscaling"
   type        = number
-  default     = 8
+  default     = 16
 }
 
 variable "max_memory" {
   description = "Maximum memory in GB for cluster autoscaling"
   type        = number
-  default     = 40
+  default     = 80
 }
 
 # General Purpose Node Pool Configuration
 variable "general_machine_type" {
   description = "Machine type for general purpose nodes"
   type        = string
-  default     = "e2-micro"
+  default     = "e2-standard-2"
 }
 
 variable "general_min_nodes" {
@@ -98,14 +98,14 @@ variable "general_min_nodes" {
 variable "general_max_nodes" {
   description = "Maximum nodes in general purpose pool"
   type        = number
-  default     = 3
+  default     = 6
 }
 
 # YugabyteDB TServer Node Pool Configuration
 variable "tserver_machine_type" {
   description = "Machine type for YugabyteDB TServer nodes"
   type        = string
-  default     = "e2-small"
+  default     = "e2-standard-4"
 }
 
 variable "tserver_min_nodes" {
@@ -117,7 +117,7 @@ variable "tserver_min_nodes" {
 variable "tserver_max_nodes" {
   description = "Maximum nodes in TServer pool"
   type        = number
-  default     = 3
+  default     = 6
 }
 
 # Environment Configuration
@@ -212,16 +212,4 @@ variable "maintenance_recurrence" {
   default     = "FREQ=WEEKLY;BYDAY=SA"
 }
 
-# For production cluster only:
-replicationFactor: 3
-master:
-  replicas: 3
-tserver:
-  replicas: 3
-enableAuth: true
-tls:
-  enabled: true
-
-# Extremely limited resources:
-cpu: "0.5"      # May cause performance issues
-memory: 1Gi     # May cause OOM kills 
+ 

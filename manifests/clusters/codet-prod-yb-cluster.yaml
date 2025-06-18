@@ -6,32 +6,41 @@ metadata:
   labels:
     environment: production
     app: yugabytedb
-    cost: minimal
+    cost: optimized
 spec:
   image:
     repository: yugabytedb/yugabyte
-    tag: latest
-  # Minimal replication even for production (cost over reliability)
-  replicationFactor: 1  # Reduced from 3 for extreme cost savings
+    tag: 2.20.2.0-b98
+  # PRODUCTION: Enable proper replication for high availability
+  replicationFactor: 3
 
   # Domain for the cluster
   domain: cluster.local
 
-  # Master Node Configuration (minimal production)
+  # Master Node Configuration (production-ready)
   master:
-    replicas: 1  # Reduced from 3 for cost savings
+    replicas: 3
     storage:
-      size: 20Gi  # Reduced from 50Gi
-      storageClass: standard-rwo  # Use standard instead of SSD
+      size: 50Gi
+      storageClass: pd-ssd
     resources:
       requests:
-        cpu: "1"        # Reduced from 2-3
-        memory: 2Gi     # Reduced from 4-6Gi
+        cpu: "2"
+        memory: 4Gi
       limits:
-        cpu: "1"        # Reduced from 3
-        memory: 2Gi     # Reduced from 6Gi
-    # Simplified affinity
+        cpu: "2"
+        memory: 4Gi
+    # Production anti-affinity for HA
     affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - yb-master
+          topologyKey: kubernetes.io/hostname
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
         - weight: 100
@@ -41,28 +50,40 @@ spec:
               operator: In
               values:
               - e2-standard-2
-    # Keep some security but disable TLS for cost
-    enableAuth: true   # Keep auth for production
+              - e2-standard-4
+    # PRODUCTION SECURITY: Enable full security
+    enableAuth: true
     tls:
-      enabled: false   # Disabled for cost savings
-    # Remove expensive annotations
-    podAnnotations: {}
+      enabled: true
+    # Production annotations for monitoring
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "7000"
 
-  # T-Server Node Configuration (minimal production)
+  # T-Server Node Configuration (production-ready)
   tserver:
-    replicas: 1  # Reduced from 5 for extreme cost savings
+    replicas: 3
     storage:
-      size: 50Gi  # Reduced from 500Gi
-      storageClass: standard-rwo  # Use standard instead of SSD
+      size: 200Gi
+      storageClass: pd-ssd
     resources:
       requests:
-        cpu: "1"        # Reduced from 4-6
-        memory: 4Gi     # Reduced from 8-12Gi
+        cpu: "2"
+        memory: 8Gi
       limits:
-        cpu: "2"        # Reduced from 6
-        memory: 4Gi     # Reduced from 12Gi
-    # Simplified affinity
+        cpu: "4"
+        memory: 8Gi
+    # Production anti-affinity for HA
     affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - yb-tserver
+          topologyKey: kubernetes.io/hostname
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
         - weight: 100
@@ -72,25 +93,51 @@ spec:
               operator: In
               values:
               - e2-standard-2
-    # Keep some security but disable TLS for cost
-    enableAuth: true   # Keep auth for production
+              - e2-standard-4
+    # PRODUCTION SECURITY: Enable full security
+    enableAuth: true
     tls:
-      enabled: false   # Disabled for cost savings
-    # Remove expensive annotations
-    podAnnotations: {}
+      enabled: true
+    # Production annotations for monitoring
+    podAnnotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9000"
 
-  # Disable monitoring for cost savings
+  # ENABLE monitoring for production
   monitoring:
-    enabled: false  # Disabled for cost savings
+    enabled: true
 
-  # Remove service monitor
+  # Enable service monitor for Prometheus
   serviceMonitor:
-    enabled: false
+    enabled: true
 
-  # Minimal resource quotas
+  # Production resource quotas
   resourceQuota:
     enabled: true
     hard:
-      requests.cpu: "4"       # Much lower than original 30
-      requests.memory: "8Gi"  # Much lower than original 60Gi
-      persistentvolumeclaims: "3"  # Reduced from 10 
+      requests.cpu: "15"
+      requests.memory: "36Gi"
+      persistentvolumeclaims: "10"
+  
+  # Production-specific configurations
+  gflags:
+    master:
+      # Production performance optimizations
+      tablet_split_size_threshold_bytes: "10737418240"
+      tablet_split_low_phase_size_threshold_bytes: "5368709120"
+      # Security settings
+      use_client_to_server_encryption: "true"
+      use_node_to_node_encryption: "true"
+    tserver:
+      # Production performance optimizations  
+      memstore_size_mb: "1024"
+      global_memstore_size_mb_max: "2048"
+      # Security settings
+      use_client_to_server_encryption: "true"
+      use_node_to_node_encryption: "true"
+
+  # Backup configuration for production
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"
+    retention: "7d" 

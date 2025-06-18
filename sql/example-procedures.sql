@@ -287,7 +287,7 @@ BEGIN
     RETURN QUERY
     SELECT u.id, u.username, u.email, u.created_at
     FROM app_schema.users u
-    WHERE (u.deleted_at IS NULL OR u.deleted_at IS NULL) 
+    WHERE u.deleted_at IS NULL 
       AND (u.username ILIKE '%' || p_search_term || '%' 
            OR u.email ILIKE '%' || p_search_term || '%')
     ORDER BY u.username

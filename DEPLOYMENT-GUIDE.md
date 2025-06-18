@@ -5,7 +5,7 @@ This guide will walk you through deploying three separate YugabyteDB instances (
 ## Prerequisites Verification
 
 According to your existing infrastructure, you have:
-- ✅ Private VPC: `yugabyte-secure-vpc`
+- ✅ Private VPC: `yugabyte-tf-vpc`
 - ✅ Subnetwork: `yugabyte-subnet-us-central1` (us-central1 region)
 - ✅ IP Range: `10.0.1.0/24`
 

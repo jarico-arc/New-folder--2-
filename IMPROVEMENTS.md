@@ -47,14 +47,14 @@ This document summarizes the comprehensive improvements made to the YugabyteDB d
 
 ### 2. Infrastructure Components
 ```
-├── VPC Network (yugabyte-secure-vpc)
+├── VPC Network (yugabyte-tf-vpc)
 ├── Private Subnet (10.0.1.0/24)
 ├── Secondary IP ranges for pods/services
 ├── Cloud NAT Gateway
 ├── Firewall rules (internal + IAP SSH)
 ├── GKE Cluster (private nodes)
-├── General Purpose Node Pool (e2-standard-4)
-└── YugabyteDB TServer Node Pool (n2-highmem-4)
+├── General Purpose Node Pool (e2-standard-2)
+└── YugabyteDB TServer Node Pool (e2-standard-4)
 ```
 
 ## 🔄 High Availability & Resilience

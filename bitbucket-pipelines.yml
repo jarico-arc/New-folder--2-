@@ -118,7 +118,7 @@ pipelines:
           script:
             - echo "🚀 Deploying to staging environment..."
             - echo "Setting up kubectl for staging GKE cluster..."
-            - echo "gcloud container clusters get-credentials yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
+            - echo "gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
             - echo "kubectl apply -f manifests/clusters/codet-staging-yb-cluster.yaml"
             - echo "✅ Staging deployment completed"
             
@@ -129,7 +129,7 @@ pipelines:
           script:
             - echo "🚀 Deploying to production environment..."
             - echo "Setting up kubectl for production GKE cluster..."
-            - echo "gcloud container clusters get-credentials yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
+            - echo "gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
             - echo "kubectl apply -f manifests/clusters/codet-prod-yb-cluster.yaml"
             - echo "✅ Production deployment completed"
 
@@ -149,7 +149,7 @@ pipelines:
           script:
             - echo "🚀 Deploying to development environment..."
             - echo "Setting up kubectl for development GKE cluster..."
-            - echo "gcloud container clusters get-credentials yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
+            - echo "gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
             - echo "kubectl apply -f manifests/clusters/codet-dev-yb-cluster.yaml"
             - echo "✅ Development deployment completed"
 

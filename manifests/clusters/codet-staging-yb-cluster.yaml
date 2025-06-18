@@ -10,7 +10,7 @@ metadata:
 spec:
   image:
     repository: yugabytedb/yugabyte
-    tag: latest
+    tag: 2.20.2.0-b98  # Use same stable version as production
   # MINIMAL: Single replication for staging cost savings
   replicationFactor: 1  # Reduced from 3 for cost
 
@@ -40,8 +40,8 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-small
               - e2-standard-2
+              - e2-standard-4
     # Disable expensive features for cost savings
     enableAuth: false  # Disabled for minimal cost
     tls:
