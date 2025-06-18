@@ -1,76 +1,134 @@
 # YugabyteDB Development Environment Values
-# Cost-optimized configuration for development
+# Optimized for smooth performance while cost-conscious
 
 image:
   repository: yugabytedb/yugabyte
-  tag: "2.20.2.0-b98"
+  tag: "2024.2.3.1-b3"
 
-# MINIMAL: Single replication for development cost savings
+# Single replication for development
 replicas:
   master: 1
   tserver: 1
 
-# Disable load balancer for cost savings
-enableLoadBalancer: false
+# Enable load balancer for external access
+enableLoadBalancer: true
 
-# Master configuration - VERY minimal for small cluster
+# Optimized resource configuration for smooth performance
 resource:
   master:
     requests:
-      cpu: "0.2"
-      memory: "512Mi"
+      cpu: "1"
+      memory: "2Gi"
     limits:
-      cpu: "0.5"
-      memory: "1Gi"
+      cpu: "2"
+      memory: "4Gi"
   tserver:
     requests:
-      cpu: "0.2"
-      memory: "512Mi"
+      cpu: "2"
+      memory: "4Gi"
     limits:
-      cpu: "0.5"
-      memory: "1Gi"
+      cpu: "4"
+      memory: "8Gi"
 
-# Storage configuration - smaller sizes
+# Storage configuration - using SSD for better performance
 storage:
   master:
-    size: "5Gi"
-    storageClass: "pd-standard"
+    count: 1
+    size: "20Gi"
+    storageClass: "pd-ssd"
   tserver:
-    size: "10Gi"
-    storageClass: "pd-standard"
+    count: 1
+    size: "50Gi"
+    storageClass: "pd-ssd"
 
-# DISABLED: Authentication and TLS for cost savings
+# Performance optimizations
+gflags:
+  master:
+    # Master performance flags
+    log_min_seconds_to_retain: "3600"
+    log_segment_size_mb: "64"
+    memory_limit_hard_bytes: "3221225472"  # 3GB
+  tserver:
+    # TServer performance flags
+    memory_limit_hard_bytes: "6442450944"  # 6GB
+    db_write_buffer_size: "67108864"  # 64MB
+    rocksdb_max_background_jobs: "4"
+    rocksdb_level0_file_num_compaction_trigger: "4"
+    rocksdb_level0_slowdown_writes_trigger: "20"
+    rocksdb_level0_stop_writes_trigger: "36"
+    log_min_seconds_to_retain: "3600"
+    log_segment_size_mb: "64"
+
+# Network and security settings
+serviceEndpoints:
+  - name: "yb-master-ui"
+    type: "LoadBalancer"
+    app: "yb-master"
+    ports:
+      http-ui: "7000"
+  - name: "yb-tserver-service"
+    type: "LoadBalancer"
+    app: "yb-tserver"
+    ports:
+      tcp-yql-port: "9042"
+      tcp-ysql-port: "5433"
+
+# Enable basic authentication for security
 auth:
   enabled: false
 
+# Disable TLS for development simplicity
 tls:
   enabled: false
 
-# DISABLED: monitoring for cost savings
-prometheus:
-  enabled: false
+# Resource annotations for better scheduling
+annotations:
+  deployment:
+    cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
 
-serviceMonitor:
-  enabled: false
+# Node affinity for optimal placement
+affinity:
+  # Prefer to schedule on different nodes if available
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values: ["yb-master", "yb-tserver"]
+        topologyKey: kubernetes.io/hostname
 
-# Remove node selector and tolerations for simple scheduling
-nodeSelector: {}
+# Startup and readiness probes for reliability
+master:
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
 
-# Remove complex affinity rules
-affinity: {}
+tserver:
+  readinessProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 30
 
-# Remove tserver tolerations that might prevent scheduling
-tolerations: {}
-
-# Labels
-labels:
-  environment: development
-  app: yugabytedb
-  cost: minimal
-
-# Disable istio
-istio:
-  enabled: false
-
-# Disable partition tolerance for single node setup
-partition_tolerance: false 
+# Enable monitoring for performance tracking
+yugabytedUi:
+  enabled: true 
