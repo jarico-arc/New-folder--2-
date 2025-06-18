@@ -1,0 +1,102 @@
+# YugabyteDB Staging Environment Values
+# Cost-optimized configuration for staging
+
+image:
+  repository: yugabytedb/yugabyte
+  tag: "2.20.2.0-b98"
+
+# MINIMAL: Single replication for staging cost savings
+replicas:
+  master: 1
+  tserver: 1
+
+# Disable load balancer for cost savings
+enableLoadBalancer: false
+
+# Master configuration
+resource:
+  master:
+    requests:
+      cpu: "0.5"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+  tserver:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+
+# Storage configuration
+storage:
+  master:
+    size: "10Gi"
+    storageClass: "pd-standard"
+  tserver:
+    size: "20Gi"
+    storageClass: "pd-standard"
+
+# DISABLED: Authentication and TLS for cost savings
+auth:
+  enabled: false
+
+tls:
+  enabled: false
+
+# DISABLED: monitoring for cost savings
+prometheus:
+  enabled: false
+
+serviceMonitor:
+  enabled: false
+
+# Node affinity for cost optimization
+nodeSelector: {}
+
+affinity:
+  master:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values:
+            - e2-micro
+            - e2-small
+  tserver:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values:
+          - e2-micro
+          - e2-small
+      - weight: 80
+        preference:
+          matchExpressions:
+          - key: node-pool
+            operator: In
+            values:
+            - yugabyte-tserver
+
+# Add tolerations for dedicated tserver nodes
+tolerations:
+  tserver:
+  - key: "yugabyte.com/tserver"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+# Labels
+labels:
+  environment: staging
+  app: yugabytedb
+  cost: minimal 

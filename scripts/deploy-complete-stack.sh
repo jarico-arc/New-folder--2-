@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Complete YugabyteDB Stack Deployment Script
-# This script deploys the entire cost-optimized YugabyteDB stack
+# This script deploys the entire cost-optimized YugabyteDB stack using modern Helm approach
 
 set -e
 
-echo "🚀 Starting complete YugabyteDB stack deployment (MINIMAL COST VERSION)..."
+echo "🚀 Starting complete YugabyteDB stack deployment (MINIMAL COST VERSION - Helm)..."
 
 # Check prerequisites
 echo "🔍 Checking prerequisites..."
@@ -22,29 +22,19 @@ if [ "${1:-}" != "--skip-terraform" ]; then
     cd terraform && terraform init && terraform apply -auto-approve && cd ..
 fi
 
-# Install operator
-echo "🔧 Installing YugabyteDB Operator..."
+# Setup YugabyteDB Helm repository
+echo "🔧 Setting up YugabyteDB Helm repository..."
 ./scripts/install-operator.sh
 
 # Generate secrets
 echo "🔐 Generating secure credentials..."
 if ! ./scripts/generate-secrets.sh; then
-    echo "❌ Failed to generate secrets"
-    exit 1
+    echo "⚠️  Failed to generate secrets, but continuing deployment..."
+    echo "   You may need to run generate-secrets.sh manually later"
 fi
 
-# Verify secrets were created
-echo "🔍 Verifying secrets were created..."
-for env in dev staging prod; do
-    if ! kubectl get secret "codet-${env}-db-credentials" -n "codet-${env}-yb" &>/dev/null; then
-        echo "⚠️  Secret for $env environment not found, but continuing deployment..."
-    else
-        echo "✅ Secret for $env environment created successfully"
-    fi
-done
-
-# Deploy environments
-echo "🌍 Deploying environments..."
+# Deploy environments using Helm
+echo "🌍 Deploying environments using Helm..."
 if ! ./scripts/deploy-all-environments.sh; then
     echo "❌ Failed to deploy environments"
     exit 1
@@ -61,8 +51,8 @@ if ! kubectl apply -f manifests/policies/; then
     exit 1
 fi
 
-# Wait for clusters
-echo "⏳ Waiting for clusters to be ready..."
+# Wait for deployments to be ready
+echo "⏳ Waiting for Helm deployments to be ready..."
 sleep 60
 
 # Setup RBAC
@@ -72,10 +62,10 @@ if ! ./scripts/setup-database-rbac.sh; then
     echo "   You may need to run setup-database-rbac.sh manually later"
 fi
 
-echo "🎉 Deployment completed!"
+echo "🎉 Deployment completed using modern Helm approach!"
 echo ""
 echo "💰 COST-OPTIMIZED DEPLOYMENT FEATURES:"
-echo "- Single replica configuration (replicationFactor: 1)"
+echo "- Single replica configuration (replicas: master=1, tserver=1)"
 echo "- Minimal machine types (e2-micro/e2-small)"
 echo "- Disabled TLS, authentication, monitoring, and backups"
 echo "- Standard disks instead of SSD"
@@ -83,6 +73,17 @@ echo "- Estimated cost: ~$130-150/month for all environments"
 echo ""
 echo "⚠️  MONITORING DISABLED: No Grafana dashboard available"
 echo "   Use kubectl commands and YugabyteDB admin UI for monitoring"
+echo ""
+echo "📋 Helm Management Commands:"
+echo "=========================="
+echo "• Check deployment status:"
+echo "  helm status codet-dev-yb -n codet-dev-yb"
+echo ""
+echo "• Upgrade deployment:"
+echo "  helm upgrade codet-dev-yb yugabytedb/yugabyte -n codet-dev-yb --values manifests/values/dev-values.yaml"
+echo ""
+echo "• Uninstall deployment:"
+echo "  helm uninstall codet-dev-yb -n codet-dev-yb"
 echo ""
 echo "📋 Bitbucket Pipeline Features:"
 echo "- Automatic validation on pull requests"

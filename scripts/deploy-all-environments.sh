@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Deploy All YugabyteDB Environments Script
-# This script creates namespaces and deploys all three YugabyteDB instances
+# This script creates namespaces and deploys all three YugabyteDB instances using Helm
 
 set -e
 
-echo "🚀 Starting deployment of all YugabyteDB environments..."
+echo "🚀 Starting deployment of all YugabyteDB environments using Helm..."
 
 # Check if kubectl is available
 if ! command -v kubectl &> /dev/null; then
@@ -13,14 +13,20 @@ if ! command -v kubectl &> /dev/null; then
     exit 1
 fi
 
-# Check if operator is running
-echo "🔍 Checking if YugabyteDB operator is running..."
-if ! kubectl get pods -n yb-operator | grep -q "Running"; then
-    echo "❌ YugabyteDB operator is not running. Please run './scripts/install-operator.sh' first."
+# Check if helm is available
+if ! command -v helm &> /dev/null; then
+    echo "❌ Helm is not installed or not in PATH"
     exit 1
 fi
 
-echo "✅ YugabyteDB operator is running"
+# Check if YugabyteDB repo is added
+echo "🔍 Checking if YugabyteDB Helm repository is available..."
+if ! helm repo list | grep -q yugabytedb; then
+    echo "❌ YugabyteDB Helm repository not found. Please run './scripts/install-operator.sh' first."
+    exit 1
+fi
+
+echo "✅ YugabyteDB Helm repository is available"
 
 # Create namespaces for all environments
 echo "📦 Creating namespaces for all environments..."
@@ -29,53 +35,60 @@ kubectl apply -f manifests/namespaces/environments.yaml
 # Deploy Development environment
 echo ""
 echo "🔧 Deploying Development environment..."
-kubectl apply -f manifests/clusters/codet-dev-yb-cluster.yaml
+helm install codet-dev-yb yugabytedb/yugabyte \
+    --namespace codet-dev-yb \
+    --values manifests/values/dev-values.yaml \
+    --wait \
+    --timeout=15m
 
 # Deploy Staging environment
 echo ""
 echo "🔧 Deploying Staging environment..."
-kubectl apply -f manifests/clusters/codet-staging-yb-cluster.yaml
+helm install codet-staging-yb yugabytedb/yugabyte \
+    --namespace codet-staging-yb \
+    --values manifests/values/staging-values.yaml \
+    --wait \
+    --timeout=15m
 
 # Deploy Production environment
 echo ""
 echo "🔧 Deploying Production environment..."
-kubectl apply -f manifests/clusters/codet-prod-yb-cluster.yaml
+helm install codet-prod-yb yugabytedb/yugabyte \
+    --namespace codet-prod-yb \
+    --values manifests/values/prod-values.yaml \
+    --wait \
+    --timeout=15m
 
 echo ""
-echo "⏳ Waiting for all clusters to be ready..."
-echo "This may take several minutes..."
+echo "⏳ Verifying all deployments..."
 
-# Function to check cluster status
-check_cluster_status() {
+# Function to check deployment status
+check_deployment_status() {
     local namespace=$1
-    local cluster_name=$2
+    local release_name=$2
     
-    echo "🔍 Checking $cluster_name in $namespace..."
+    echo "🔍 Checking $release_name in $namespace..."
     
-    # Wait for the cluster to be created
-    timeout=600  # 10 minutes
-    elapsed=0
-    
-    while [ $elapsed -lt $timeout ]; do
-        if kubectl get ybcluster $cluster_name -n $namespace &>/dev/null; then
-            echo "✅ $cluster_name created successfully"
-            break
-        fi
-        sleep 10
-        elapsed=$((elapsed + 10))
-        echo "⏳ Waiting for $cluster_name to be created... (${elapsed}s/${timeout}s)"
-    done
-    
-    if [ $elapsed -ge $timeout ]; then
-        echo "❌ Timeout waiting for $cluster_name to be created"
+    # Check Helm release status
+    if helm status $release_name -n $namespace | grep -q "deployed"; then
+        echo "✅ $release_name deployed successfully"
+        
+        # Check if pods are running
+        local running_pods=$(kubectl get pods -n $namespace | grep -c "Running" || echo "0")
+        local total_pods=$(kubectl get pods -n $namespace | grep -c "yb-" || echo "0")
+        
+        echo "   Pods: $running_pods/$total_pods running"
+        return 0
+    else
+        echo "❌ $release_name deployment failed"
         return 1
     fi
 }
 
-# Check all clusters
-check_cluster_status "codet-dev-yb" "codet-dev-yb"
-check_cluster_status "codet-staging-yb" "codet-staging-yb"
-check_cluster_status "codet-prod-yb" "codet-prod-yb"
+# Check all deployments
+check_deployment_status "codet-dev-yb" "codet-dev-yb"
+check_deployment_status "codet-staging-yb" "codet-staging-yb"
+check_deployment_status "codet-prod-yb" "codet-prod-yb"
 
 echo ""
 echo "📋 Deployment Summary:"
@@ -83,23 +96,23 @@ echo "===================="
 
 for env in dev staging prod; do
     namespace="codet-${env}-yb"
-    cluster_name="codet-${env}-yb"
+    release_name="codet-${env}-yb"
     
     echo ""
     echo "🌟 $env Environment ($namespace):"
-    echo "   Cluster: $cluster_name"
+    echo "   Release: $release_name"
     
-    if kubectl get ybcluster $cluster_name -n $namespace &>/dev/null; then
+    if helm status $release_name -n $namespace | grep -q "deployed"; then
         echo "   Status: ✅ Deployed"
         echo "   Pods:"
-        kubectl get pods -n $namespace | grep -E "(master|tserver)" | head -5
+        kubectl get pods -n $namespace | grep yb- | head -5
     else
         echo "   Status: ❌ Failed"
     fi
 done
 
 echo ""
-echo "🎉 All environments deployed!"
+echo "🎉 All environments deployed using Helm!"
 echo ""
 echo "📍 Access Information:"
 echo "====================="
@@ -131,6 +144,18 @@ echo ""
 echo "Production:"
 echo "  kubectl port-forward -n codet-prod-yb svc/codet-prod-yb-yb-master-ui 7002:7000"
 echo "  Then access: http://localhost:7002"
+echo ""
+echo "📋 Helm Management Commands:"
+echo "=========================="
+echo ""
+echo "Check status:"
+echo "  helm status codet-dev-yb -n codet-dev-yb"
+echo ""
+echo "Upgrade deployment:"
+echo "  helm upgrade codet-dev-yb yugabytedb/yugabyte -n codet-dev-yb --values manifests/values/dev-values.yaml"
+echo ""
+echo "Uninstall deployment:"
+echo "  helm uninstall codet-dev-yb -n codet-dev-yb"
 echo ""
 echo "Next steps:"
 echo "  1. Wait for all pods to be in 'Running' state"

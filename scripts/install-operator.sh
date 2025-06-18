@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# YugabyteDB Operator Installation Script
-# This script installs the YugabyteDB operator in your GKE cluster
+# YugabyteDB Helm Repository Setup Script
+# This script prepares the YugabyteDB Helm repository for deployment
 
 set -e
 
-echo "🚀 Starting YugabyteDB Operator installation..."
+echo "🚀 Setting up YugabyteDB Helm repository..."
 
 # Check if kubectl is available
 if ! command -v kubectl &> /dev/null; then
@@ -21,43 +21,36 @@ fi
 
 echo "✅ kubectl connection verified"
 
-# Create operator namespace
-echo "📦 Creating YugabyteDB operator namespace..."
-kubectl apply -f manifests/operator/namespace.yaml
-
-# Add YugabyteDB Helm repository
-echo "📥 Adding YugabyteDB Helm repository..."
+# Check if helm is available
 if ! command -v helm &> /dev/null; then
     echo "❌ Helm is not installed. Please install Helm first."
     exit 1
 fi
 
+echo "✅ Helm is available"
+
+# Add YugabyteDB Helm repository
+echo "📥 Adding YugabyteDB Helm repository..."
 helm repo add yugabytedb https://charts.yugabyte.com
 helm repo update
 
-# Install the YugabyteDB operator
-echo "⚙️  Installing YugabyteDB operator..."
-helm install yugabyte-operator yugabytedb/yugabyte-k8s-operator \
-    --namespace yb-operator \
-    --create-namespace \
-    --wait \
-    --timeout=10m
-
-# Verify installation
-echo "🔍 Verifying operator installation..."
-kubectl wait --for=condition=ready pod -l app=yugabyte-k8s-operator -n yb-operator --timeout=300s
-
-if kubectl get pods -n yb-operator | grep -q "Running"; then
-    echo "✅ YugabyteDB operator installed successfully!"
-    echo "📋 Operator status:"
-    kubectl get pods -n yb-operator
+# Verify repository is added
+echo "🔍 Verifying YugabyteDB charts are available..."
+if helm search repo yugabytedb/yugabyte | grep -q yugabyte; then
+    echo "✅ YugabyteDB charts are available"
+    helm search repo yugabytedb/yugabyte | head -5
 else
-    echo "❌ Operator installation failed"
+    echo "❌ YugabyteDB charts not found"
     exit 1
 fi
 
 echo ""
-echo "🎉 YugabyteDB operator is ready!"
+echo "🎉 YugabyteDB Helm repository setup completed!"
+echo ""
+echo "📋 Available deployment options:"
+echo "  • Direct Helm deployment (recommended)"
+echo "  • File-based deployment using values files"
+echo ""
 echo "Next steps:"
 echo "  1. Run './scripts/deploy-all-environments.sh' to deploy database instances"
 echo "  2. Configure database security with './scripts/setup-database-rbac.sh'" 
