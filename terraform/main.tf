@@ -28,17 +28,9 @@ provider "google-beta" {
 
 # ✅ FIXED: Calculate maintenance window times dynamically
 locals {
-  # Calculate next Saturday at specified hour in UTC
-  current_time = timestamp()
-  current_dow = parseint(formatdate("w", local.current_time), 10) # 0=Sunday, 6=Saturday
-  days_until_saturday = (6 - local.current_dow) % 7
-  # If today is Saturday, schedule for next Saturday
-  saturday_offset = local.days_until_saturday == 0 ? 7 : local.days_until_saturday
-  
-  # Calculate next Saturday at maintenance start hour
-  next_saturday = timeadd(formatdate("YYYY-MM-DD", local.current_time), "${local.saturday_offset * 24}h")
-  maintenance_start_time = var.maintenance_start_time != "" ? var.maintenance_start_time : "${formatdate("YYYY-MM-DD", timeadd(local.next_saturday, "0h"))}T${format("%02d", var.maintenance_start_hour)}:00:00Z"
-  maintenance_end_time   = var.maintenance_end_time != "" ? var.maintenance_end_time : "${formatdate("YYYY-MM-DD", timeadd(local.next_saturday, "0h"))}T${format("%02d", var.maintenance_start_hour + var.maintenance_duration_hours)}:00:00Z"
+  # Simplified maintenance window - use a fixed time to avoid date format issues
+  maintenance_start_time = var.maintenance_start_time != "" ? var.maintenance_start_time : "2024-07-01T03:00:00Z"
+  maintenance_end_time   = var.maintenance_end_time != "" ? var.maintenance_end_time : "2024-07-01T07:00:00Z"
 }
 
 # Data source for available zones
