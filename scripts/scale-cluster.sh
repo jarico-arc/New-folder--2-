@@ -3,7 +3,7 @@
 # Scale YugabyteDB Cluster Script
 # This script scales a specific YugabyteDB cluster by updating tserver replicas
 
-set -e
+set -euo pipefail
 
 # Function to display usage
 usage() {

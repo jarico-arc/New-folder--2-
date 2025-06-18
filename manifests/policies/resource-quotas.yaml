@@ -1,0 +1,101 @@
+# Resource Quotas for YugabyteDB Environments
+# Prevents resource exhaustion and enforces environment-specific limits
+
+---
+# Development Environment Resource Quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-resource-quota
+  namespace: codet-dev-yb
+spec:
+  hard:
+    # Compute resources
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    
+    # Storage
+    requests.storage: 200Gi
+    persistentvolumeclaims: "10"
+    
+    # Object counts
+    pods: "20"
+    services: "10"
+    configmaps: "20"
+    secrets: "20"
+
+---
+# Staging Environment Resource Quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: staging-resource-quota
+  namespace: codet-staging-yb
+spec:
+  hard:
+    # Compute resources
+    requests.cpu: "24"
+    requests.memory: 48Gi
+    limits.cpu: "48"
+    limits.memory: 96Gi
+    
+    # Storage
+    requests.storage: 1Ti
+    persistentvolumeclaims: "20"
+    
+    # Object counts
+    pods: "30"
+    services: "15"
+    configmaps: "30"
+    secrets: "30"
+
+---
+# Production Environment Resource Quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: prod-resource-quota
+  namespace: codet-prod-yb
+spec:
+  hard:
+    # Compute resources
+    requests.cpu: "48"
+    requests.memory: 96Gi
+    limits.cpu: "96"
+    limits.memory: 192Gi
+    
+    # Storage
+    requests.storage: 5Ti
+    persistentvolumeclaims: "50"
+    
+    # Object counts
+    pods: "50"
+    services: "20"
+    configmaps: "50"
+    secrets: "50"
+
+---
+# Operator Namespace Resource Quota
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: operator-resource-quota
+  namespace: yb-operator
+spec:
+  hard:
+    # Compute resources
+    requests.cpu: "2"
+    requests.memory: 4Gi
+    limits.cpu: "4"
+    limits.memory: 8Gi
+    
+    # Storage
+    requests.storage: 20Gi
+    
+    # Object counts
+    pods: "10"
+    services: "5"
+    configmaps: "10"
+    secrets: "10" 

@@ -1,133 +1,100 @@
 # YugabyteDB Development Environment Values
-# Optimized for smooth performance while cost-conscious
+# Optimized for smooth performance while cost-conscious + CDC enabled
 
 image:
   repository: yugabytedb/yugabyte
   tag: "2024.2.3.1-b3"
 
-# Single replication for development
+# Single replication for development cost savings
 replicas:
   master: 1
   tserver: 1
 
-# Enable load balancer for external access
-enableLoadBalancer: true
+# Disable load balancer for cost savings initially
+enableLoadBalancer: false
 
-# Optimized resource configuration for smooth performance
+# Minimal but working resource configuration
 resource:
   master:
+    requests:
+      cpu: "0.5"
+      memory: "1Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+  tserver:
     requests:
       cpu: "1"
       memory: "2Gi"
     limits:
       cpu: "2"
       memory: "4Gi"
-  tserver:
-    requests:
-      cpu: "2"
-      memory: "4Gi"
-    limits:
-      cpu: "4"
-      memory: "8Gi"
 
-# Storage configuration - using SSD for better performance
+# Storage configuration - using standard PDs
 storage:
   master:
     count: 1
-    size: "20Gi"
-    storageClass: "pd-ssd"
+    size: "10Gi"
+    storageClass: "pd-standard"
   tserver:
     count: 1
-    size: "50Gi"
-    storageClass: "pd-ssd"
+    size: "20Gi"
+    storageClass: "pd-standard"
 
-# Performance optimizations
-gflags:
-  master:
-    # Master performance flags
-    log_min_seconds_to_retain: "3600"
-    log_segment_size_mb: "64"
-    memory_limit_hard_bytes: "3221225472"  # 3GB
-  tserver:
-    # TServer performance flags
-    memory_limit_hard_bytes: "6442450944"  # 6GB
-    db_write_buffer_size: "67108864"  # 64MB
-    rocksdb_max_background_jobs: "4"
-    rocksdb_level0_file_num_compaction_trigger: "4"
-    rocksdb_level0_slowdown_writes_trigger: "20"
-    rocksdb_level0_stop_writes_trigger: "36"
-    log_min_seconds_to_retain: "3600"
-    log_segment_size_mb: "64"
-
-# Network and security settings
-serviceEndpoints:
-  - name: "yb-master-ui"
-    type: "LoadBalancer"
-    app: "yb-master"
-    ports:
-      http-ui: "7000"
-  - name: "yb-tserver-service"
-    type: "LoadBalancer"
-    app: "yb-tserver"
-    ports:
-      tcp-yql-port: "9042"
-      tcp-ysql-port: "5433"
-
-# Enable basic authentication for security
+# SECURITY WARNING: Auth disabled for development only
+# ENABLE in production!
 auth:
   enabled: false
 
-# Disable TLS for development simplicity
 tls:
   enabled: false
 
-# Resource annotations for better scheduling
+# Monitoring disabled for cost optimization
+istio:
+  enabled: false
+
+# Disable unnecessary features for cost optimization + CDC optimizations
+gflags:
+  master:
+    max_clock_skew_usec: 200000
+    default_memory_limit_to_ram_ratio: 0.85
+    # CDC-specific flags
+    cdc_state_checkpoint_update_interval_ms: 15000
+    
+  tserver:
+    max_clock_skew_usec: 200000
+    # FIXED: Removed conflicting memory_limit_hard_bytes
+    default_memory_limit_to_ram_ratio: 0.85
+    # CDC-specific optimizations
+    cdc_state_checkpoint_update_interval_ms: 15000
+    cdc_checkpoint_opid_interval_ms: 60000
+    update_min_cdc_indices_interval_secs: 60
+    cdc_max_stream_intent_records: 1000
+    log_min_seconds_to_retain: 3600  # Keep WAL for 1 hour for CDC
+
+# Pod disruption budget settings
+podDisruptionBudget:
+  maxUnavailable: 1
+
+# Network policy disabled for simplicity
+networkPolicy:
+  enabled: false
+
+# Service configuration - expose CDC ports
+service:
+  enabled: true
+  type: ClusterIP
+  ports:
+    # Standard YugabyteDB ports
+    ysql: 5433
+    ycql: 9042
+    yb-master-ui: 7000
+    # CDC-specific ports
+    cdc-service: 8080
+
+# Annotations for cost optimization
 annotations:
-  deployment:
-    cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
-
-# Node affinity for optimal placement
-affinity:
-  # Prefer to schedule on different nodes if available
-  podAntiAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 100
-      podAffinityTerm:
-        labelSelector:
-          matchExpressions:
-          - key: app
-            operator: In
-            values: ["yb-master", "yb-tserver"]
-        topologyKey: kubernetes.io/hostname
-
-# Startup and readiness probes for reliability
-master:
-  readinessProbe:
-    enabled: true
-    initialDelaySeconds: 30
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 3
-  startupProbe:
-    enabled: true
-    initialDelaySeconds: 30
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 30
-
-tserver:
-  readinessProbe:
-    enabled: true
-    initialDelaySeconds: 30
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 3
-  startupProbe:
-    enabled: true
-    initialDelaySeconds: 30
-    periodSeconds: 10
-    timeoutSeconds: 5
-    failureThreshold: 30
+  cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
 
 # Enable monitoring for performance tracking
 yugabytedUi:

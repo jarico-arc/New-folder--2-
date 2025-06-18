@@ -23,16 +23,21 @@ metadata:
   namespace: codet-dev-yb
 spec:
   podSelector:
-    matchLabels:
-      app: yugabytedb
+    matchExpressions:
+    - key: app
+      operator: In
+      values: ["yb-master", "yb-tserver"]
   policyTypes:
   - Ingress
   - Egress
   ingress:
+  # Allow YugabyteDB pods to communicate with each other
   - from:
     - podSelector:
-        matchLabels:
-          app: yugabytedb
+        matchExpressions:
+        - key: app
+          operator: In
+          values: ["yb-master", "yb-tserver"]
     ports:
     - protocol: TCP
       port: 7000  # Master web UI
@@ -46,6 +51,7 @@ spec:
       port: 5433  # PostgreSQL
     - protocol: TCP
       port: 9042  # Cassandra
+  # Allow monitoring access
   - from:
     - namespaceSelector:
         matchLabels:
@@ -56,10 +62,13 @@ spec:
     - protocol: TCP
       port: 9000
   egress:
+  # Allow YugabyteDB pods to communicate with each other
   - to:
     - podSelector:
-        matchLabels:
-          app: yugabytedb
+        matchExpressions:
+        - key: app
+          operator: In
+          values: ["yb-master", "yb-tserver"]
     ports:
     - protocol: TCP
       port: 7000
@@ -99,16 +108,21 @@ metadata:
   namespace: codet-staging-yb
 spec:
   podSelector:
-    matchLabels:
-      app: yugabytedb
+    matchExpressions:
+    - key: app
+      operator: In
+      values: ["yb-master", "yb-tserver"]
   policyTypes:
   - Ingress
   - Egress
   ingress:
+  # Allow YugabyteDB pods to communicate with each other
   - from:
     - podSelector:
-        matchLabels:
-          app: yugabytedb
+        matchExpressions:
+        - key: app
+          operator: In
+          values: ["yb-master", "yb-tserver"]
     ports:
     - protocol: TCP
       port: 7000
@@ -122,6 +136,7 @@ spec:
       port: 5433
     - protocol: TCP
       port: 9042
+  # Allow monitoring access
   - from:
     - namespaceSelector:
         matchLabels:
@@ -132,10 +147,13 @@ spec:
     - protocol: TCP
       port: 9000
   egress:
+  # Allow YugabyteDB pods to communicate with each other
   - to:
     - podSelector:
-        matchLabels:
-          app: yugabytedb
+        matchExpressions:
+        - key: app
+          operator: In
+          values: ["yb-master", "yb-tserver"]
     ports:
     - protocol: TCP
       port: 7000
@@ -145,6 +163,7 @@ spec:
       port: 9000
     - protocol: TCP
       port: 9100
+  # Allow DNS
   - to: []
     ports:
     - protocol: UDP
@@ -174,16 +193,21 @@ metadata:
   namespace: codet-prod-yb
 spec:
   podSelector:
-    matchLabels:
-      app: yugabytedb
+    matchExpressions:
+    - key: app
+      operator: In
+      values: ["yb-master", "yb-tserver"]
   policyTypes:
   - Ingress
   - Egress
   ingress:
+  # Allow YugabyteDB pods to communicate with each other
   - from:
     - podSelector:
-        matchLabels:
-          app: yugabytedb
+        matchExpressions:
+        - key: app
+          operator: In
+          values: ["yb-master", "yb-tserver"]
     ports:
     - protocol: TCP
       port: 7000
@@ -197,6 +221,7 @@ spec:
       port: 5433
     - protocol: TCP
       port: 9042
+  # Allow monitoring access
   - from:
     - namespaceSelector:
         matchLabels:
@@ -207,10 +232,13 @@ spec:
     - protocol: TCP
       port: 9000
   egress:
+  # Allow YugabyteDB pods to communicate with each other
   - to:
     - podSelector:
-        matchLabels:
-          app: yugabytedb
+        matchExpressions:
+        - key: app
+          operator: In
+          values: ["yb-master", "yb-tserver"]
     ports:
     - protocol: TCP
       port: 7000
@@ -220,6 +248,7 @@ spec:
       port: 9000
     - protocol: TCP
       port: 9100
+  # Allow DNS
   - to: []
     ports:
     - protocol: UDP
@@ -241,19 +270,22 @@ spec:
   policyTypes:
   - Egress
   egress:
+  # Allow monitoring to access YugabyteDB namespaces
   - to:
     - namespaceSelector:
-        matchLabels:
-          app: yugabytedb
+        matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: ["codet-dev-yb", "codet-staging-yb", "codet-prod-yb"]
     ports:
     - protocol: TCP
       port: 7000
     - protocol: TCP
       port: 9000
+  # Allow DNS
   - to: []
     ports:
     - protocol: UDP
       port: 53
     - protocol: TCP
-      port: 53
-  # No ingress or egress rules = deny all (except what's explicitly allowed by other policies) 
+      port: 53 

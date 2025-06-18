@@ -344,4 +344,225 @@ INSERT INTO app_schema.users VALUES (...);         -- Permission denied
 UPDATE app_schema.users SET email = '...';         -- Permission denied
 DELETE FROM app_schema.users WHERE id = 1;         -- Permission denied
 DROP TABLE app_schema.users;                       -- Permission denied
-*/ 
+*/
+
+BEGIN;
+
+-- Cache invalidation function
+CREATE OR REPLACE FUNCTION invalidate_cache(cache_key TEXT, reason TEXT DEFAULT 'update')
+RETURNS VOID AS $$
+BEGIN
+    -- Notify cache invalidation
+    PERFORM pg_notify('cache_invalidate', json_build_object(
+        'key', cache_key,
+        'action', 'invalidate',
+        'timestamp', now()::text,
+        'reason', reason
+    )::text);
+    
+    -- Log the invalidation
+    INSERT INTO cache_invalidation_log (cache_key, reason, invalidated_at)
+    VALUES (cache_key, reason, now())
+    ON CONFLICT (cache_key, invalidated_at) DO NOTHING;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create cache invalidation log table if not exists
+CREATE TABLE IF NOT EXISTS cache_invalidation_log (
+    id SERIAL PRIMARY KEY,
+    cache_key TEXT NOT NULL,
+    reason TEXT,
+    invalidated_at TIMESTAMP DEFAULT now()
+);
+
+-- Create unique index to prevent duplicate logs
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cache_log_key_time 
+ON cache_invalidation_log (cache_key, invalidated_at);
+
+-- Job queue enqueue function
+CREATE OR REPLACE FUNCTION enqueue_job(
+    job_type_param TEXT,
+    payload_param JSONB,
+    priority_param INTEGER DEFAULT 0,
+    delay_seconds INTEGER DEFAULT 0
+)
+RETURNS UUID AS $$
+DECLARE
+    job_id UUID;
+    run_at TIMESTAMP;
+BEGIN
+    job_id := gen_random_uuid();
+    run_at := now() + (delay_seconds || ' seconds')::interval;
+    
+    INSERT INTO job_queue (
+        job_id, job_type, payload, priority, 
+        status, created_at, run_at
+    )
+    VALUES (
+        job_id, job_type_param, payload_param, priority_param,
+        'pending', now(), run_at
+    );
+    
+    RETURN job_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Job queue dequeue function with worker assignment
+CREATE OR REPLACE FUNCTION dequeue_job(
+    worker_id_param TEXT,
+    job_types TEXT[] DEFAULT NULL
+)
+RETURNS TABLE (
+    job_id UUID,
+    job_type TEXT,
+    payload JSONB,
+    priority INTEGER,
+    attempts INTEGER
+) AS $$
+DECLARE
+    job_record RECORD;
+BEGIN
+    -- Find and lock the next available job
+    SELECT jq.job_id, jq.job_type, jq.payload, jq.priority, jq.attempts
+    INTO job_record
+    FROM job_queue jq
+    WHERE jq.status = 'pending'
+      AND jq.run_at <= now()
+      AND (job_types IS NULL OR jq.job_type = ANY(job_types))
+    ORDER BY jq.priority DESC, jq.created_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED;
+    
+    IF job_record IS NULL THEN
+        RETURN;
+    END IF;
+    
+    -- Update job status to running
+    UPDATE job_queue
+    SET status = 'running',
+        worker_id = worker_id_param,
+        started_at = now(),
+        attempts = attempts + 1
+    WHERE job_queue.job_id = job_record.job_id;
+    
+    -- Return job details
+    job_id := job_record.job_id;
+    job_type := job_record.job_type;
+    payload := job_record.payload;
+    priority := job_record.priority;
+    attempts := job_record.attempts;
+    
+    RETURN NEXT;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Complete job function
+CREATE OR REPLACE FUNCTION complete_job(job_id_param UUID)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE job_queue
+    SET status = 'completed',
+        completed_at = now()
+    WHERE job_id = job_id_param;
+    
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Job % not found', job_id_param;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Fail job function with retry logic
+CREATE OR REPLACE FUNCTION fail_job(
+    job_id_param UUID,
+    error_message TEXT,
+    should_retry BOOLEAN DEFAULT TRUE
+)
+RETURNS VOID AS $$
+DECLARE
+    max_attempts INTEGER := 3;
+    current_attempts INTEGER;
+BEGIN
+    SELECT attempts INTO current_attempts
+    FROM job_queue
+    WHERE job_id = job_id_param;
+    
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Job % not found', job_id_param;
+    END IF;
+    
+    -- Check if we should retry
+    IF should_retry AND current_attempts < max_attempts THEN
+        UPDATE job_queue
+        SET status = 'pending',
+            worker_id = NULL,
+            error_message = error_message,
+            run_at = now() + (power(2, current_attempts) || ' minutes')::interval  -- Exponential backoff
+        WHERE job_id = job_id_param;
+    ELSE
+        UPDATE job_queue
+        SET status = 'failed',
+            error_message = error_message,
+            completed_at = now()
+        WHERE job_id = job_id_param;
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Event emission function for CDC
+CREATE OR REPLACE FUNCTION emit_event(
+    event_type_param TEXT,
+    entity_type_param TEXT,
+    entity_id_param TEXT,
+    event_data_param JSONB,
+    metadata_param JSONB DEFAULT '{}'::jsonb
+)
+RETURNS UUID AS $$
+DECLARE
+    event_id UUID;
+BEGIN
+    event_id := gen_random_uuid();
+    
+    INSERT INTO events (
+        event_id, event_type, entity_type, entity_id,
+        event_data, metadata, created_at
+    )
+    VALUES (
+        event_id, event_type_param, entity_type_param, entity_id_param,
+        event_data_param, metadata_param, now()
+    );
+    
+    -- Notify event stream listeners
+    PERFORM pg_notify('event_stream', json_build_object(
+        'event_id', event_id,
+        'event_type', event_type_param,
+        'entity_type', entity_type_param,
+        'entity_id', entity_id_param,
+        'timestamp', now()::text
+    )::text);
+    
+    RETURN event_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create events table if not exists
+CREATE TABLE IF NOT EXISTS events (
+    event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_type TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    event_data JSONB NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP DEFAULT now()
+);
+
+-- Create indexes for better query performance
+CREATE INDEX IF NOT EXISTS idx_events_entity_type_id 
+ON events (entity_type, entity_id);
+
+CREATE INDEX IF NOT EXISTS idx_events_type_created 
+ON events (event_type, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_events_created 
+ON events (created_at);
+
+COMMIT; 

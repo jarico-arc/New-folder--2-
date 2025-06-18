@@ -3,7 +3,7 @@
 # Deploy All YugabyteDB Environments Script
 # This script creates namespaces and deploys all three YugabyteDB instances using Helm
 
-set -e
+set -euo pipefail
 
 echo "🚀 Starting deployment of all YugabyteDB environments using Helm..."
 

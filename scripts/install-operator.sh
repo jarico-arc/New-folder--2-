@@ -3,7 +3,7 @@
 # YugabyteDB Helm Repository Setup Script
 # This script prepares the YugabyteDB Helm repository for deployment
 
-set -e
+set -euo pipefail
 
 echo "🚀 Setting up YugabyteDB Helm repository..."
 

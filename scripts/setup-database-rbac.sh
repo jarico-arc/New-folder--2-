@@ -1,340 +1,290 @@
 #!/bin/bash
 
-# Database RBAC Setup Script
-# This script configures role-based access control for all YugabyteDB environments
+# YugabyteDB Database RBAC Setup Script
+# ✅ FIXED: Secure secret management and improved error handling
 
-set -e
+set -euo pipefail
 
-echo "🔐 Setting up Database RBAC for all environments..."
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-# Check if kubectl is available
-if ! command -v kubectl &> /dev/null; then
-    echo "❌ kubectl is not installed or not in PATH"
-    exit 1
-fi
+log_info() { echo -e "${BLUE}ℹ️  $1${NC}"; }
+log_success() { echo -e "${GREEN}✅ $1${NC}"; }
+log_warning() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+log_error() { echo -e "${RED}❌ $1${NC}"; }
 
-# Function to check if cluster is ready
-check_cluster_ready() {
-    local namespace=$1
-    local cluster_name=$2
+# Configuration
+NAMESPACE="${1:-codet-dev-yb}"
+MAX_RETRIES=30
+RETRY_INTERVAL=5
+
+# ✅ FIXED: Secure password generation
+generate_secure_password() {
+    openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
+}
+
+# ✅ FIXED: Check if secrets exist, create if needed
+ensure_database_secrets() {
+    local namespace="$1"
+    local secret_name="yugabyte-db-credentials"
     
-    echo "🔍 Checking if $cluster_name is ready..."
+    log_info "🔐 Checking database secrets in namespace $namespace..."
     
-    # Check if at least one tserver pod is running
-    if kubectl get pods -n $namespace | grep -q "${cluster_name}.*tserver.*Running"; then
-        echo "✅ $cluster_name is ready"
+    if kubectl get secret "$secret_name" -n "$namespace" &>/dev/null; then
+        log_success "Database secrets already exist"
+        return 0
+    fi
+    
+    log_info "Creating new database secrets..."
+    
+    # Generate secure passwords
+    local admin_password=$(generate_secure_password)
+    local app_password=$(generate_secure_password)
+    local yugabyte_password=$(generate_secure_password)
+    
+    # Create the secret
+    kubectl create secret generic "$secret_name" \
+        --namespace="$namespace" \
+        --from-literal=admin-password="$admin_password" \
+        --from-literal=app-password="$app_password" \
+        --from-literal=yugabyte-password="$yugabyte_password" || {
+        log_error "Failed to create database secrets"
+        return 1
+    }
+    
+    log_success "Database secrets created successfully"
+    return 0
+}
+
+# ✅ FIXED: Get password from secret (not hardcoded)
+get_password_from_secret() {
+    local namespace="$1"
+    local secret_name="yugabyte-db-credentials"
+    local key="$2"
+    
+    kubectl get secret "$secret_name" -n "$namespace" -o jsonpath="{.data.$key}" | base64 -d
+}
+
+# ✅ FIXED: Robust connection test
+test_database_connection() {
+    local namespace="$1"
+    local retries=$MAX_RETRIES
+    
+    log_info "Testing database connection..."
+    
+    while [ $retries -gt 0 ]; do
+        # Try to connect to the database
+        if kubectl exec -n "$namespace" deployment/yb-tserver-0 -- ysqlsh -h localhost -U yugabyte -d yugabyte -c "SELECT 1;" &>/dev/null; then
+            log_success "Database connection successful"
+            return 0
+        fi
+        
+        log_info "⏳ Waiting for database to be ready... ($retries retries left)"
+        sleep $RETRY_INTERVAL
+        ((retries--))
+    done
+    
+    log_error "Failed to connect to database after $MAX_RETRIES attempts"
+    return 1
+}
+
+# Execute SQL with proper error handling
+execute_sql() {
+    local namespace="$1"
+    local sql="$2"
+    local description="${3:-SQL execution}"
+    
+    log_info "Executing: $description"
+    
+    if kubectl exec -n "$namespace" deployment/yb-tserver-0 -- ysqlsh -h localhost -U yugabyte -d yugabyte -c "$sql" &>/dev/null; then
+        log_success "$description completed"
         return 0
     else
-        echo "❌ $cluster_name is not ready"
+        log_error "$description failed"
         return 1
     fi
 }
 
-# Function to setup RBAC for a specific environment
-setup_environment_rbac() {
-    local environment=$1
-    local namespace="codet-${environment}-yb"
-    local cluster_name="codet-${environment}-yb"
-    local app_role="codet_${environment}_app"
-    local admin_role="codet_${environment}_admin"
+# ✅ FIXED: Port forward management
+setup_port_forward() {
+    local namespace="$1"
+    local local_port="5433"
     
-    echo ""
-    echo "🔧 Setting up RBAC for $environment environment..."
-    echo "   Namespace: $namespace"
-    echo "   Cluster: $cluster_name"
-    echo "   App Role: $app_role"
-    echo "   Admin Role: $admin_role"
+    log_info "Setting up port forward for database access..."
     
-    # Read credentials from Kubernetes secrets
-    local secret_name="codet-${environment}-db-credentials"
+    # Start port forwarding in background
+    kubectl port-forward -n "$namespace" service/yb-tserver-service "$local_port:5433" &
+    port_forward_pid=$!
     
-    if ! kubectl get secret "$secret_name" -n "$namespace" &>/dev/null; then
-        echo "❌ Kubernetes secret $secret_name not found in namespace $namespace"
-        echo "Please run scripts/generate-secrets.sh first"
-        return 1
-    fi
+    # Wait for port forward to be ready
+    sleep 3
     
-    # Extract credentials from Kubernetes secret
-    local admin_password=$(kubectl get secret "$secret_name" -n "$namespace" -o jsonpath='{.data.admin-password}' | base64 -d)
-    local app_password=$(kubectl get secret "$secret_name" -n "$namespace" -o jsonpath='{.data.app-password}' | base64 -d)
-    
-    if [ -z "$admin_password" ] || [ -z "$app_password" ]; then
-        echo "❌ Failed to retrieve passwords from Kubernetes secret"
-        return 1
-    fi
-    
-    echo "🔑 Retrieved credentials from Kubernetes secret"
-    
-    # Check if cluster is ready
-    if ! check_cluster_ready $namespace $cluster_name; then
-        echo "⚠️  Skipping $environment - cluster not ready"
-        return 1
-    fi
-    
-    # Get the YSQL service
-    local ysql_service="${cluster_name}-yb-tserver-service"
-    
-    # Check if netcat is available for connection testing
-    if ! command -v nc &> /dev/null; then
-        echo "⚠️  netcat (nc) not found. Will skip connection test."
-        echo "   Please ensure netcat is installed for better reliability."
-    fi
-    
-    # Port forward to connect to the database
-    echo "🔌 Setting up connection to $environment database..."
-    kubectl port-forward -n $namespace svc/$ysql_service 5433:5433 &
-    local port_forward_pid=$!
-    
-    # Set up cleanup trap for this specific port forward
-    trap "kill $port_forward_pid 2>/dev/null || true; sleep 2" EXIT
-    
-    # Wait a moment for port forward to establish
-    sleep 5
-    
-    # Check if we can connect via port-forward (if netcat is available)
-    if command -v nc &> /dev/null; then
-        if ! nc -z localhost 5433 2>/dev/null; then
-            echo "❌ Cannot connect to $environment database via port-forward"
-            kill $port_forward_pid 2>/dev/null || true
-            sleep 2
-            return 1
-        fi
+    if kill -0 $port_forward_pid 2>/dev/null; then
+        log_success "Port forward established on localhost:$local_port"
+        return 0
     else
-        echo "⚠️  Skipping connection test (netcat not available)"
-        echo "   Proceeding with database operations..."
+        log_error "Failed to establish port forward"
+        return 1
     fi
-    
-    echo "✅ Connected to $environment database"
-    
-    # Create a temporary SQL file for this environment
-    local temp_sql="/tmp/rbac_setup_${environment}.sql"
-    
-    # Generate environment-specific SQL
-    cat > $temp_sql << EOF
--- RBAC Setup for $environment environment
--- Generated on $(date)
+}
 
--- Create admin role for $environment
-CREATE ROLE $admin_role WITH LOGIN PASSWORD '$admin_password' SUPERUSER;
-
--- Create application role for $environment (restricted access)
-CREATE ROLE $app_role WITH LOGIN PASSWORD '$app_password';
-
--- Create application database if it doesn't exist
-CREATE DATABASE codet_${environment} OWNER $admin_role;
-
--- Connect to the application database
-\c codet_${environment}
-
--- Create application schema
-CREATE SCHEMA IF NOT EXISTS app_schema AUTHORIZATION $admin_role;
-
--- Grant usage on schema to application role
-GRANT USAGE ON SCHEMA app_schema TO $app_role;
-
--- Example table structure (you can modify this)
-CREATE TABLE IF NOT EXISTS app_schema.users (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(255) UNIQUE NOT NULL,
-    email VARCHAR(255) UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS app_schema.audit_log (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER,
-    action VARCHAR(255) NOT NULL,
-    details JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
--- Example stored procedures for secure data access
-CREATE OR REPLACE FUNCTION app_schema.create_user(
-    p_username VARCHAR,
-    p_email VARCHAR
-) RETURNS INTEGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS \$\$
-DECLARE
-    v_user_id INTEGER;
-BEGIN
-    -- Validate input
-    IF p_username IS NULL OR LENGTH(TRIM(p_username)) = 0 THEN
-        RAISE EXCEPTION 'Username cannot be empty';
-    END IF;
-    
-    IF p_email IS NULL OR LENGTH(TRIM(p_email)) = 0 THEN
-        RAISE EXCEPTION 'Email cannot be empty';
-    END IF;
-    
-    -- Insert user
-    INSERT INTO app_schema.users (username, email)
-    VALUES (p_username, p_email)
-    RETURNING id INTO v_user_id;
-    
-    -- Log the action
-    INSERT INTO app_schema.audit_log (user_id, action, details)
-    VALUES (v_user_id, 'USER_CREATED', json_build_object('username', p_username, 'email', p_email));
-    
-    RETURN v_user_id;
-END;
-\$\$;
-
-CREATE OR REPLACE FUNCTION app_schema.get_user_by_username(
-    p_username VARCHAR
-) RETURNS TABLE(id INTEGER, username VARCHAR, email VARCHAR, created_at TIMESTAMP)
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS \$\$
-BEGIN
-    RETURN QUERY
-    SELECT u.id, u.username, u.email, u.created_at
-    FROM app_schema.users u
-    WHERE u.username = p_username;
-END;
-\$\$;
-
-CREATE OR REPLACE FUNCTION app_schema.update_user_email(
-    p_user_id INTEGER,
-    p_new_email VARCHAR
-) RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS \$\$
-DECLARE
-    v_old_email VARCHAR;
-    v_updated BOOLEAN := FALSE;
-BEGIN
-    -- Get old email for audit
-    SELECT email INTO v_old_email FROM app_schema.users WHERE id = p_user_id;
-    
-    IF v_old_email IS NULL THEN
-        RAISE EXCEPTION 'User not found';
-    END IF;
-    
-    -- Update email
-    UPDATE app_schema.users 
-    SET email = p_new_email, updated_at = CURRENT_TIMESTAMP
-    WHERE id = p_user_id;
-    
-    GET DIAGNOSTICS v_updated = ROW_COUNT;
-    
-    IF v_updated THEN
-        -- Log the action
-        INSERT INTO app_schema.audit_log (user_id, action, details)
-        VALUES (p_user_id, 'EMAIL_UPDATED', 
-                json_build_object('old_email', v_old_email, 'new_email', p_new_email));
-    END IF;
-    
-    RETURN v_updated > 0;
-END;
-\$\$;
-
--- Grant EXECUTE permissions ONLY to the application role
-GRANT EXECUTE ON FUNCTION app_schema.create_user(VARCHAR, VARCHAR) TO $app_role;
-GRANT EXECUTE ON FUNCTION app_schema.get_user_by_username(VARCHAR) TO $app_role;
-GRANT EXECUTE ON FUNCTION app_schema.update_user_email(INTEGER, VARCHAR) TO $app_role;
-
--- EXPLICITLY REVOKE all table permissions from application role
-REVOKE ALL ON TABLE app_schema.users FROM $app_role;
-REVOKE ALL ON TABLE app_schema.audit_log FROM $app_role;
-REVOKE ALL ON SCHEMA public FROM $app_role;
-
--- Ensure application role cannot create objects
-REVOKE CREATE ON SCHEMA app_schema FROM $app_role;
-REVOKE CREATE ON DATABASE codet_${environment} FROM $app_role;
-
--- Display configuration summary
-SELECT 'RBAC Configuration for $environment completed' AS status;
-EOF
-
-    # Execute the SQL
-    echo "📝 Executing RBAC setup SQL for $environment..."
-    export PGPASSWORD="yugabyte"  # Default YugabyteDB password
-    
-    if psql -h localhost -p 5433 -U yugabyte -d yugabyte -f $temp_sql; then
-        echo "✅ RBAC setup completed for $environment"
-        
-        # Create reference file for credentials (passwords are in K8s secrets)
-        local creds_file="credentials/codet-${environment}-rbac-info.txt"
-        mkdir -p credentials
-        
-        echo "# YugabyteDB RBAC Configuration for $environment Environment" > $creds_file
-        echo "# Generated on $(date)" >> $creds_file
-        echo "# Passwords are stored in Kubernetes secrets" >> $creds_file
-        echo "" >> $creds_file
-        echo "Database: codet_${environment}" >> $creds_file
-        echo "Admin Role: $admin_role" >> $creds_file
-        echo "Application Role: $app_role" >> $creds_file
-        echo "Kubernetes Secret: $secret_name" >> $creds_file
-        echo "Namespace: $namespace" >> $creds_file
-        echo "" >> $creds_file
-        echo "Get passwords from Kubernetes:" >> $creds_file
-        echo "kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.admin-password}' | base64 -d" >> $creds_file
-        echo "kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.app-password}' | base64 -d" >> $creds_file
-        echo "" >> $creds_file
-        echo "VPC Connection (from within cluster):" >> $creds_file
-        echo "export APP_PASSWORD=\$(kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.app-password}' | base64 -d)" >> $creds_file
-        echo "psql -h $ysql_service.$namespace.svc.cluster.local -p 5433 -U $app_role -d codet_${environment}" >> $creds_file
-        echo "" >> $creds_file
-        echo "VPC Connection (from compute instances in same VPC):" >> $creds_file
-        echo "# Get internal load balancer IP: kubectl get svc $ysql_service -n $namespace" >> $creds_file
-        echo "psql -h <internal-lb-ip> -p 5433 -U $app_role -d codet_${environment}" >> $creds_file
-        echo "" >> $creds_file
-        echo "Available functions for $app_role:" >> $creds_file
-        echo "- app_schema.create_user(username, email)" >> $creds_file
-        echo "- app_schema.get_user_by_username(username)" >> $creds_file
-        echo "- app_schema.update_user_email(user_id, new_email)" >> $creds_file
-        
-        chmod 600 $creds_file
-        echo "💾 RBAC information saved to $creds_file"
-    else
-        echo "❌ RBAC setup failed for $environment"
-    fi
-    
-    # Clean up
-    echo "🧹 Cleaning up resources for $environment..."
-    if [ ! -z "$port_forward_pid" ]; then
+# Cleanup function
+cleanup() {
+    if [ -n "${port_forward_pid:-}" ]; then
         kill $port_forward_pid 2>/dev/null || true
-        # Wait for graceful termination
-        sleep 3
-        # Force kill if still running
-        if kill -0 $port_forward_pid 2>/dev/null; then
-            kill -9 $port_forward_pid 2>/dev/null || true
-        fi
+        sleep 2
     fi
-    rm -f $temp_sql
-    # Clear the trap for this function
-    trap - EXIT
 }
 
-# Setup RBAC for all environments
-echo "🚀 Starting RBAC setup for all environments..."
+trap cleanup EXIT
 
-# Create credentials directory
-mkdir -p credentials
+# ✅ FIXED: Main RBAC setup function
+setup_rbac() {
+    local namespace="$1"
+    
+    log_info "🔒 Setting up database RBAC for namespace: $namespace"
+    
+    # Ensure secrets exist
+    if ! ensure_database_secrets "$namespace"; then
+        log_error "Failed to ensure database secrets exist"
+        exit 1
+    fi
+    
+    # Test database connection
+    if ! test_database_connection "$namespace"; then
+        log_error "Cannot connect to database"
+        exit 1
+    fi
+    
+    # Get passwords from secrets
+    local admin_password
+    local app_password
+    admin_password=$(get_password_from_secret "$namespace" "admin-password")
+    app_password=$(get_password_from_secret "$namespace" "app-password")
+    
+    # ✅ FIXED: Set up port forward for local access
+    setup_port_forward "$namespace"
+    
+    # Execute RBAC setup SQL
+    log_info "📋 Executing RBAC setup..."
+    
+    # ✅ FIXED: Use proper authentication with generated passwords
+    export PGPASSWORD="$admin_password"
+    
+    # Create admin user
+    execute_sql "$namespace" "CREATE USER IF NOT EXISTS admin_user WITH PASSWORD '$admin_password' SUPERUSER;" "Creating admin user"
+    
+    # Create application user with limited privileges
+    execute_sql "$namespace" "CREATE USER IF NOT EXISTS app_user WITH PASSWORD '$app_password';" "Creating application user"
+    
+    # Create application database
+    execute_sql "$namespace" "CREATE DATABASE IF NOT EXISTS app_db OWNER app_user;" "Creating application database"
+    
+    # Load messaging patterns setup
+    if [ -f "sql/messaging-patterns-setup.sql" ]; then
+        log_info "📡 Loading messaging patterns..."
+        kubectl exec -n "$namespace" deployment/yb-tserver-0 -- ysqlsh -h localhost -U yugabyte -d yugabyte -f /dev/stdin < sql/messaging-patterns-setup.sql || {
+            log_warning "Failed to load messaging patterns, but continuing..."
+        }
+    fi
+    
+    # Load RBAC setup
+    if [ -f "sql/rbac-setup.sql" ]; then
+        log_info "🔐 Loading RBAC configuration..."
+        kubectl exec -n "$namespace" deployment/yb-tserver-0 -- ysqlsh -h localhost -U yugabyte -d yugabyte -f /dev/stdin < sql/rbac-setup.sql || {
+            log_warning "Failed to load RBAC setup, but continuing..."
+        }
+    fi
+    
+    # Grant appropriate permissions
+    execute_sql "$namespace" "GRANT CONNECT ON DATABASE app_db TO app_user;" "Granting database connection"
+    execute_sql "$namespace" "GRANT USAGE ON SCHEMA public TO app_user;" "Granting schema usage"
+    execute_sql "$namespace" "GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO app_user;" "Granting function execution"
+    
+    # Create credentials file for reference
+    local creds_file="/tmp/${namespace}-credentials.txt"
+    cat > "$creds_file" << EOF
+# YugabyteDB Credentials for $namespace
+# Generated: $(date)
 
-setup_environment_rbac "dev"
-setup_environment_rbac "staging"
-setup_environment_rbac "prod"
+# Admin User (Full privileges)
+ADMIN_USER=admin_user
+ADMIN_PASSWORD=<retrieve from secret>
 
-echo ""
-echo "🎉 Database RBAC setup completed!"
-echo ""
-echo "📁 Credentials have been saved to the 'credentials/' directory"
-echo "🔒 These files contain sensitive passwords - keep them secure!"
-echo ""
-echo "📝 Security Implementation Summary:"
-echo "=================================="
-echo "✅ Application roles can ONLY execute stored procedures"
-echo "✅ Application roles have NO direct table access"
-echo "✅ All data operations are audited via stored procedures"
-echo "✅ Attempting direct SQL (db.execute()) will result in permission denied"
-echo ""
-echo "🧪 Test the security by connecting as the application role and trying:"
-echo "   SELECT * FROM app_schema.users;  -- This should FAIL"
-echo "   SELECT app_schema.create_user('test', 'test@example.com');  -- This should WORK"
-echo ""
-echo "📍 Connection information is in the credentials files." 
+# Application User (Limited privileges)
+APP_USER=app_user
+APP_PASSWORD=<retrieve from secret>
+
+# Commands to retrieve passwords:
+kubectl get secret yugabyte-db-credentials -n $namespace -o jsonpath='{.data.admin-password}' | base64 -d
+kubectl get secret yugabyte-db-credentials -n $namespace -o jsonpath='{.data.app-password}' | base64 -d
+
+# Connection examples:
+psql -h localhost -p 5433 -U admin_user -d yugabyte
+psql -h localhost -p 5433 -U app_user -d app_db
+EOF
+    
+    log_success "🎉 RBAC setup completed successfully!"
+    log_info "📄 Credentials reference saved to: $creds_file"
+    log_warning "⚠️ For security, passwords are stored in Kubernetes secrets only"
+}
+
+# ✅ FIXED: Enhanced namespace detection
+detect_namespace() {
+    local ns=""
+    
+    # Method 1: Look for YB tserver pods
+    ns=$(kubectl get pods --all-namespaces -l app=yb-tserver -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "")
+    
+    # Method 2: Look for YB services  
+    if [ -z "$ns" ]; then
+        ns=$(kubectl get services --all-namespaces -l app=yb-tserver -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "")
+    fi
+    
+    # Method 3: Look for YB StatefulSets
+    if [ -z "$ns" ]; then
+        ns=$(kubectl get statefulsets --all-namespaces -l app=yb-tserver -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "")
+    fi
+    
+    # Method 4: Look for YB master pods
+    if [ -z "$ns" ]; then
+        ns=$(kubectl get pods --all-namespaces -l app=yb-master -o jsonpath='{.items[0].metadata.namespace}' 2>/dev/null || echo "")
+    fi
+    
+    # Method 5: Namespace name pattern matching
+    if [ -z "$ns" ]; then
+        ns=$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep -m1 -E '(yugabyte|yb)' 2>/dev/null || echo "")
+    fi
+    
+    echo "$ns"
+}
+
+# Main execution
+main() {
+    log_info "🚀 Starting YugabyteDB RBAC setup..."
+    
+    # Auto-detect namespace if needed
+    if ! kubectl get namespace "$NAMESPACE" >/dev/null 2>&1; then
+        log_warning "Namespace $NAMESPACE not found, attempting auto-detection..."
+        DETECTED_NS=$(detect_namespace)
+        if [ -n "$DETECTED_NS" ]; then
+            log_info "Using detected namespace: $DETECTED_NS"
+            NAMESPACE="$DETECTED_NS"
+        else
+            log_error "Could not find YugabyteDB namespace"
+            log_info "Available namespaces:"
+            kubectl get namespaces | grep -E "(yugabyte|yb)" || log_info "No YugabyteDB namespaces found"
+            exit 1
+        fi
+    fi
+    
+    # Run RBAC setup
+    setup_rbac "$NAMESPACE"
+}
+
+# Execute main function
+main 

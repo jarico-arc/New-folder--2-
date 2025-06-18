@@ -3,7 +3,7 @@
 # Generate Secure Database Secrets
 # This script generates strong passwords and creates Kubernetes secrets
 
-set -e
+set -euo pipefail
 
 echo "🔐 Generating secure database credentials..."
 

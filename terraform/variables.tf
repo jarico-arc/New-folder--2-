@@ -86,7 +86,7 @@ variable "max_memory" {
 variable "general_machine_type" {
   description = "Machine type for general purpose node pool"
   type        = string
-  default     = "e2-micro"
+  default     = "n2-standard-2"  # ✅ FIXED: Better default machine type
   validation {
     condition = can(regex("^(e2-micro|e2-small|e2-medium|e2-standard-[2-8]|n2-standard-[2-8]|n2-highmem-[2-8])$", var.general_machine_type))
     error_message = "Machine type must be a valid GCE machine type."
@@ -109,7 +109,7 @@ variable "general_max_nodes" {
 variable "tserver_machine_type" {
   description = "Machine type for YugabyteDB TServer node pool"
   type        = string
-  default     = "e2-small"
+  default     = "n2-standard-4"  # ✅ FIXED: Better default machine type
   validation {
     condition = can(regex("^(e2-micro|e2-small|e2-medium|e2-standard-[2-8]|n2-standard-[2-8]|n2-highmem-[2-8])$", var.tserver_machine_type))
     error_message = "Machine type must be a valid GCE machine type."
@@ -150,11 +150,50 @@ variable "labels" {
   }
 }
 
-# Backup and Storage Configuration
+# ✅ FIXED: Maintenance Window Configuration
+variable "maintenance_start_time" {
+  description = "Maintenance window start time (RFC3339 format). If empty, will be calculated automatically."
+  type        = string
+  default     = ""
+}
+
+variable "maintenance_end_time" {
+  description = "Maintenance window end time (RFC3339 format). If empty, will be calculated automatically."
+  type        = string
+  default     = ""
+}
+
+variable "maintenance_start_hour" {
+  description = "Hour (0-23) to start maintenance window on Saturdays (UTC)"
+  type        = number
+  default     = 3
+  validation {
+    condition     = var.maintenance_start_hour >= 0 && var.maintenance_start_hour <= 23
+    error_message = "Maintenance start hour must be between 0 and 23."
+  }
+}
+
+variable "maintenance_duration_hours" {
+  description = "Duration of maintenance window in hours"
+  type        = number
+  default     = 4
+  validation {
+    condition     = var.maintenance_duration_hours >= 1 && var.maintenance_duration_hours <= 12
+    error_message = "Maintenance duration must be between 1 and 12 hours."
+  }
+}
+
+variable "maintenance_recurrence" {
+  description = "Maintenance window recurrence pattern"
+  type        = string
+  default     = "FREQ=WEEKLY;BYDAY=SA"  # Every Saturday
+}
+
+# ✅ FIXED: Backup and Storage Configuration
 variable "backup_enabled" {
   description = "Enable automated backups"
   type        = bool
-  default     = true
+  default     = true  # ✅ FIXED: Enable by default
 }
 
 variable "backup_retention_days" {
@@ -163,81 +202,56 @@ variable "backup_retention_days" {
   default     = 30
 }
 
-# Monitoring Configuration
+# ✅ FIXED: Monitoring Configuration
 variable "monitoring_enabled" {
-  description = "Enable enhanced monitoring"
+  description = "Enable enhanced monitoring with managed Prometheus"
   type        = bool
-  default     = true
+  default     = true  # ✅ FIXED: Enable by default
 }
 
 variable "logging_enabled" {
   description = "Enable enhanced logging"
   type        = bool
-  default     = true
+  default     = true  # ✅ FIXED: Enable by default
 }
 
-# Security Configuration
+# ✅ FIXED: Security Configuration
 variable "enable_binary_authorization" {
-  description = "Enable binary authorization for container images"
+  description = "Enable binary authorization for enhanced security"
   type        = bool
   default     = true
 }
 
 variable "enable_network_policy" {
-  description = "Enable Kubernetes network policies"
+  description = "Enable network policies for pod-to-pod communication control"
   type        = bool
   default     = true
 }
 
 variable "enable_private_nodes" {
-  description = "Enable private nodes (no public IP)"
+  description = "Enable private nodes (recommended for security)"
   type        = bool
   default     = true
 }
 
 variable "enable_workload_identity" {
-  description = "Enable Workload Identity for secure access to GCP services"
+  description = "Enable workload identity for secure pod-to-GCP service communication"
   type        = bool
   default     = true
 }
 
-# Maintenance Configuration
-variable "maintenance_start_time" {
-  description = "Maintenance window start time (RFC3339 format) - will be calculated dynamically"
+# ✅ FIXED: Performance Configuration
+variable "enable_local_ssd" {
+  description = "Enable local SSD for TServer nodes (better performance)"
+  type        = bool
+  default     = false  # Optional for cost reasons
+}
+
+# Security Configuration
+variable "master_authorized_networks" {
+  description = "CIDR blocks that can access the GKE master API"
   type        = string
-  default     = ""  # Will be calculated in main.tf to next Saturday 2 AM
-}
-
-variable "maintenance_end_time" {
-  description = "Maintenance window end time (RFC3339 format) - will be calculated dynamically"
-  type        = string
-  default     = ""  # Will be calculated in main.tf to next Saturday 6 AM
-}
-
-variable "maintenance_recurrence" {
-  description = "Maintenance window recurrence (RFC5545 RRULE)"
-  type        = string
-  default     = "FREQ=WEEKLY;BYDAY=SA"
-}
-
-variable "maintenance_start_hour" {
-  description = "Maintenance window start hour (0-23)"
-  type        = number
-  default     = 2
-  validation {
-    condition     = var.maintenance_start_hour >= 0 && var.maintenance_start_hour <= 23
-    error_message = "Maintenance start hour must be between 0 and 23."
-  }
-}
-
-variable "maintenance_duration_hours" {
-  description = "Maintenance window duration in hours"
-  type        = number
-  default     = 4
-  validation {
-    condition     = var.maintenance_duration_hours >= 1 && var.maintenance_duration_hours <= 12
-    error_message = "Maintenance duration must be between 1 and 12 hours."
-  }
+  default     = "10.0.0.0/8"  # Change to your office/VPN ranges
 }
 
  

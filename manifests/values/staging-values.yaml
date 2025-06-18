@@ -1,59 +1,63 @@
 # YugabyteDB Staging Environment Values
-# Cost-optimized configuration for staging
+# Production-like configuration for staging with security enabled
 
 image:
   repository: yugabytedb/yugabyte
   tag: "2.20.2.0-b98"
 
-# MINIMAL: Single replication for staging cost savings
+# IMPROVED: Better replication for staging reliability
 replicas:
-  master: 1
-  tserver: 1
+  master: 3    # ✅ FIXED: Proper quorum for testing
+  tserver: 3   # ✅ FIXED: Multi-node testing
 
-# Disable load balancer for cost savings
-enableLoadBalancer: false
+# Enable load balancer for staging
+enableLoadBalancer: true
 
-# Master configuration
+# IMPROVED RESOURCES: Better than dev, less than prod
 resource:
   master:
     requests:
-      cpu: "0.5"
-      memory: "1Gi"
+      cpu: "1"       # ✅ FIXED: Increased from 0.5
+      memory: "2Gi"  # ✅ FIXED: Increased from 1Gi
     limits:
-      cpu: "1"
-      memory: "2Gi"
+      cpu: "2"       # ✅ FIXED: Increased from 1
+      memory: "4Gi"  # ✅ FIXED: Increased from 2Gi
   tserver:
     requests:
-      cpu: "1"
-      memory: "2Gi"
+      cpu: "2"       # ✅ FIXED: Increased from 1
+      memory: "4Gi"  # ✅ FIXED: Increased from 2Gi
     limits:
-      cpu: "1"
-      memory: "2Gi"
+      cpu: "4"       # ✅ FIXED: Increased from 1
+      memory: "8Gi"  # ✅ FIXED: Increased from 2Gi
 
-# Storage configuration
+# IMPROVED STORAGE: Better storage for staging
 storage:
   master:
-    size: "10Gi"
-    storageClass: "pd-standard"
+    size: "50Gi"            # ✅ FIXED: Increased from 10Gi
+    storageClass: "pd-ssd"  # ✅ FIXED: SSD for better performance
   tserver:
-    size: "20Gi"
-    storageClass: "pd-standard"
+    size: "200Gi"           # ✅ FIXED: Increased from 20Gi
+    storageClass: "pd-ssd"  # ✅ FIXED: SSD for better performance
 
-# DISABLED: Authentication and TLS for cost savings
+# ✅ FIXED: ENABLE Authentication for staging (production-like)
 auth:
-  enabled: false
+  enabled: true
+  useSecretFile: true
 
+# ✅ FIXED: ENABLE TLS for staging (production-like)
 tls:
-  enabled: false
+  enabled: true
+  certManager:
+    enabled: true
 
-# DISABLED: monitoring for cost savings
+# ✅ FIXED: ENABLE monitoring for staging
 prometheus:
-  enabled: false
+  enabled: true
 
 serviceMonitor:
-  enabled: false
+  enabled: true
 
-# Node affinity for cost optimization
+# Node affinity for staging workloads
 nodeSelector: {}
 
 affinity:
@@ -66,8 +70,8 @@ affinity:
           - key: node.kubernetes.io/instance-type
             operator: In
             values:
-            - e2-micro
-            - e2-small
+            - n2-standard-2    # ✅ FIXED: Better machine types
+            - n2-standard-4
   tserver:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
@@ -77,8 +81,8 @@ affinity:
           - key: node.kubernetes.io/instance-type
             operator: In
             values:
-          - e2-micro
-          - e2-small
+            - n2-standard-4    # ✅ FIXED: Better machine types
+            - n2-highmem-4
       - weight: 80
         preference:
           matchExpressions:
@@ -95,8 +99,67 @@ tolerations:
     value: "true"
     effect: "NoSchedule"
 
+# ✅ FIXED: Enable security features
+rbac:
+  create: true
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 10001
+
+# ✅ FIXED: Enable network policies
+networkPolicy:
+  enabled: true
+
+# ✅ FIXED: Enable backup for staging
+backup:
+  enabled: true
+  retentionDays: 7
+  schedule: "0 3 * * *"  # Daily at 3 AM
+
+# ✅ FIXED: Staging-appropriate gflags
+gflags:
+  master:
+    # Security flags
+    use_client_to_server_encryption: "true"
+    use_node_to_node_encryption: "true"
+    certs_dir: "/opt/certs"
+    # Performance flags
+    tablet_split_size_threshold_bytes: "5368709120"  # 5GB
+    tablet_split_low_phase_size_threshold_bytes: "2684354560"  # 2.5GB
+    # CDC optimizations
+    cdc_state_checkpoint_update_interval_ms: 15000
+    
+  tserver:
+    # Security flags
+    use_client_to_server_encryption: "true"
+    use_node_to_node_encryption: "true"
+    certs_dir: "/opt/certs"
+    # Performance flags  
+    memstore_size_mb: "512"
+    global_memstore_size_mb_max: "1024"
+    # CDC optimizations
+    cdc_state_checkpoint_update_interval_ms: 15000
+    cdc_checkpoint_opid_interval_ms: 60000
+    update_min_cdc_indices_interval_secs: 60
+    cdc_max_stream_intent_records: 1000
+    log_min_seconds_to_retain: 43200  # Keep WAL for 12 hours
+
 # Labels
 labels:
   environment: staging
   app: yugabytedb
-  cost: minimal 
+  security: enabled
+  backup: enabled 

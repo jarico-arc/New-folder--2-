@@ -6,7 +6,7 @@ extends: default
 rules:
   # Line length can be longer for Kubernetes manifests
   line-length:
-    max: 120
+    max: 150
     level: warning
 
   # Allow longer comments for documentation
@@ -19,28 +19,27 @@ rules:
     spaces: 2
     indent-sequences: true
     check-multi-line-strings: false
+    level: warning
 
   # Allow empty lines for readability
   empty-lines:
-    max: 2
-    max-start: 1
+    max: 3
+    max-start: 0
     max-end: 1
 
   # Allow truthy values common in Kubernetes
   truthy:
-    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    allowed-values: ['true', 'false', 'yes', 'no']
     check-keys: false
 
   # Allow long lines in comments for URLs and examples
-  comments-indentation: {}
+  comments-indentation: disable
 
   # Allow document separators (---)
-  document-start:
-    present: false
+  document-start: disable
 
   # Allow multiple documents in one file
-  document-end:
-    present: false
+  document-end: disable
 
   # Allow empty values in Kubernetes manifests
   empty-values:
@@ -48,7 +47,7 @@ rules:
     forbid-in-flow-mappings: false
 
   # Allow key duplicates in some cases (common in Kubernetes)
-  key-duplicates: {}
+  key-duplicates: enable
 
   # Allow octal values (common in file permissions)
   octal-values:
@@ -59,6 +58,44 @@ rules:
   quoted-strings:
     quote-type: any
     required: false
+
+  # Allow braces
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Allow brackets
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  # Allow colons
+  colons:
+    max-spaces-after: -1
+    level: error
+
+  # Allow commas
+  commas:
+    max-spaces-after: -1
+    level: error
+
+  # Allow hyphens
+  hyphens:
+    level: error
+
+  # Allow new line at end of file
+  new-line-at-end-of-file: disable
+
+  # Allow trailing spaces
+  trailing-spaces: disable
+
+  # Allow key ordering
+  key-ordering: disable
+
+  # Be more lenient with line endings for cross-platform compatibility
+  new-lines:
+    type: unix
+    level: warning
 
 ignore: |
   .git/

@@ -21,8 +21,8 @@ spec:
   master:
     replicas: 1  # Reduced from 3 for cost savings
     storage:
-      size: 10Gi  # Reduced from 20Gi
-      storageClass: pd-standard  # Changed from standard-rwo for better consistency
+      size: 20Gi  # Increased for better staging experience
+      storageClass: pd-ssd  # Consistent with production
     resources:
       requests:
         cpu: "0.5"      # Reduced significantly
@@ -42,17 +42,17 @@ spec:
               values:
               - e2-micro
               - e2-small
-    # DISABLED: Authentication and TLS for cost savings
+    # ENABLED: TLS for security (auth still disabled for cost)
     enableAuth: false
     tls:
-      enabled: false
+      enabled: true
 
   # T-Server Node Configuration (minimal staging)
   tserver:
     replicas: 1  # Reduced from 3 for single node setup
     storage:
-      size: 20Gi  # Reduced from 100Gi
-      storageClass: pd-standard  # Changed from standard-rwo for better consistency
+      size: 100Gi  # Production-like sizing for proper testing
+      storageClass: pd-ssd  # Consistent with production
     resources:
       requests:
         cpu: "1"        # Consistent baseline
@@ -86,10 +86,10 @@ spec:
               operator: In
               values:
               - yugabyte-tserver
-    # DISABLED: Authentication and TLS for cost savings
+    # ENABLED: TLS for security (auth still disabled for cost)
     enableAuth: false
     tls:
-      enabled: false
+      enabled: true
 
   # DISABLED: monitoring for cost savings
   monitoring:

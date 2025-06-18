@@ -6,31 +6,31 @@ metadata:
   labels:
     environment: production
     app: yugabytedb
-    cost: minimal
+    security: enabled
 spec:
   image:
     repository: yugabytedb/yugabyte
     tag: 2.20.2.0-b98
-  # MINIMAL: Single replication for cost savings
-  replicationFactor: 1
+  # ✅ FIXED: Proper replication for production
+  replicationFactor: 3  # ✅ FIXED: High availability
 
   # Domain for the cluster
   domain: cluster.local
 
-  # Master Node Configuration (minimal cost)
+  # Master Node Configuration (production-grade)
   master:
-    replicas: 1
+    replicas: 3  # ✅ FIXED: Proper quorum
     storage:
-      size: 10Gi
-      storageClass: pd-standard
+      size: 100Gi           # ✅ FIXED: Increased from 10Gi
+      storageClass: pd-ssd  # ✅ FIXED: SSD for performance
     resources:
       requests:
-        cpu: "0.5"
-        memory: 1Gi
+        cpu: "2"       # ✅ FIXED: Increased from 0.5
+        memory: 4Gi    # ✅ FIXED: Increased from 1Gi
       limits:
-        cpu: "1"
-        memory: 2Gi
-    # Simplified affinity
+        cpu: "4"       # ✅ FIXED: Increased from 1
+        memory: 8Gi    # ✅ FIXED: Increased from 2Gi
+    # Production-grade affinity
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
@@ -40,33 +40,42 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-micro
-              - e2-small
-    # DISABLED: Authentication and TLS for cost savings
-    enableAuth: false
+              - n2-standard-4
+              - n2-standard-8
+              - n2-highmem-4
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values: ["yb-master"]
+          topologyKey: kubernetes.io/hostname
+    # ✅ FIXED: ENABLE Authentication and TLS for production
+    enableAuth: true
     tls:
-      enabled: false
+      enabled: true
 
-  # T-Server Node Configuration (minimal cost)
+  # T-Server Node Configuration (production-grade)
   tserver:
-    replicas: 1
+    replicas: 3  # ✅ FIXED: High availability
     storage:
-      size: 20Gi
-      storageClass: pd-standard
+      size: 500Gi          # ✅ FIXED: Increased from 20Gi
+      storageClass: pd-ssd # ✅ FIXED: SSD for performance
     resources:
       requests:
-        cpu: "1"
-        memory: 2Gi
+        cpu: "4"       # ✅ FIXED: Increased from 1
+        memory: 8Gi    # ✅ FIXED: Increased from 2Gi
       limits:
-        cpu: "1"
-        memory: 2Gi
+        cpu: "8"       # ✅ FIXED: Increased from 1
+        memory: 16Gi   # ✅ FIXED: Increased from 2Gi
     # Add tolerations for dedicated tserver nodes
     tolerations:
     - key: "yugabyte.com/tserver"
       operator: "Equal"
       value: "true"
       effect: "NoSchedule"
-    # Simplified affinity
+    # Production-grade affinity
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
@@ -76,8 +85,9 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-micro
-              - e2-small
+              - n2-standard-8
+              - n2-highmem-8
+              - n2-highmem-16
         # Prefer tserver nodes if available
         - weight: 80
           preference:
@@ -86,44 +96,80 @@ spec:
               operator: In
               values:
               - yugabyte-tserver
-    # DISABLED: Authentication and TLS for cost savings
-    enableAuth: false
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values: ["yb-tserver"]
+          topologyKey: kubernetes.io/hostname
+    # ✅ FIXED: ENABLE Authentication and TLS for production
+    enableAuth: true
     tls:
-      enabled: false
+      enabled: true
 
-  # DISABLED: monitoring for cost savings
+  # ✅ FIXED: ENABLE monitoring for production
   monitoring:
-    enabled: false
+    enabled: true
 
-  # Disable service monitor
+  # Enable service monitor
   serviceMonitor:
-    enabled: false
+    enabled: true
 
-  # Minimal resource quotas
+  # Production resource quotas
   resourceQuota:
     enabled: true
     hard:
-      requests.cpu: "3"
-      requests.memory: "4Gi"
-      persistentvolumeclaims: "3"
+      requests.cpu: "24"     # ✅ FIXED: Increased from 3
+      requests.memory: "48Gi" # ✅ FIXED: Increased from 4Gi
+      persistentvolumeclaims: "10" # ✅ FIXED: Increased from 3
   
-  # Minimal configurations
+  # ✅ FIXED: Production-grade configurations
   gflags:
     master:
-      # Minimal performance settings
-      tablet_split_size_threshold_bytes: "1073741824"
-      tablet_split_low_phase_size_threshold_bytes: "536870912"
-      # Disabled security for cost
-      use_client_to_server_encryption: "false"
-      use_node_to_node_encryption: "false"
+      # Security settings
+      use_client_to_server_encryption: "true"
+      use_node_to_node_encryption: "true"
+      certs_dir: "/opt/certs"
+      # Performance settings
+      tablet_split_size_threshold_bytes: "10737418240"  # 10GB
+      tablet_split_low_phase_size_threshold_bytes: "5368709120"  # 5GB
+      # CDC optimizations
+      cdc_state_checkpoint_update_interval_ms: 15000
+      
     tserver:
-      # Minimal performance settings  
-      memstore_size_mb: "256"
-      global_memstore_size_mb_max: "512"
-      # Disabled security for cost
-      use_client_to_server_encryption: "false"
-      use_node_to_node_encryption: "false"
+      # Security settings
+      use_client_to_server_encryption: "true"
+      use_node_to_node_encryption: "true"
+      certs_dir: "/opt/certs"
+      # Performance settings  
+      memstore_size_mb: "1024"
+      global_memstore_size_mb_max: "2048"
+      # CDC optimizations
+      cdc_state_checkpoint_update_interval_ms: 15000
+      cdc_checkpoint_opid_interval_ms: 60000
+      update_min_cdc_indices_interval_secs: 60
+      cdc_max_stream_intent_records: 1000
+      log_min_seconds_to_retain: 86400  # Keep WAL for 24 hours
 
-  # DISABLED: Backup for cost savings
+  # ✅ FIXED: Complete backup configuration for production
   backup:
-    enabled: false 
+    enabled: true
+    retentionDays: 30
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    storageBackend:
+      type: "gcs"
+      gcs:
+        bucketName: "yugabytedb-backups-prod"
+        pathPrefix: "codet-prod-yb"
+        # Credentials will be provided via Workload Identity or service account
+        credentialsSecretName: "gcs-backup-credentials"
+    parallelism: 4  # Number of parallel backup streams
+    compression: true
+    encryption: true
+    # Full backup weekly, incremental daily
+    incrementalBackup:
+      enabled: true
+      frequency: "daily"
+      fullBackupFrequency: "weekly" 

@@ -26,13 +26,19 @@ provider "google-beta" {
   region  = var.region
 }
 
-# Calculate maintenance window times dynamically
+# ✅ FIXED: Calculate maintenance window times dynamically
 locals {
-  # Calculate next Saturday at specified hour
+  # Calculate next Saturday at specified hour in UTC
   current_time = timestamp()
-  # Simple calculation for next Saturday - this will create a maintenance window for next Saturday
-  maintenance_start_time = var.maintenance_start_time != "" ? var.maintenance_start_time : formatdate("YYYY-MM-DD'T'hh:mm:ss'Z'", timeadd(timestamp(), "168h"))  # Next week same time as fallback
-  maintenance_end_time   = var.maintenance_end_time != "" ? var.maintenance_end_time : formatdate("YYYY-MM-DD'T'hh:mm:ss'Z'", timeadd(timestamp(), "${168 + var.maintenance_duration_hours}h"))
+  current_dow = parseint(formatdate("w", local.current_time), 10) # 0=Sunday, 6=Saturday
+  days_until_saturday = (6 - local.current_dow) % 7
+  # If today is Saturday, schedule for next Saturday
+  saturday_offset = local.days_until_saturday == 0 ? 7 : local.days_until_saturday
+  
+  # Calculate next Saturday at maintenance start hour
+  next_saturday = timeadd(formatdate("YYYY-MM-DD", local.current_time), "${local.saturday_offset * 24}h")
+  maintenance_start_time = var.maintenance_start_time != "" ? var.maintenance_start_time : "${formatdate("YYYY-MM-DD", timeadd(local.next_saturday, "0h"))}T${format("%02d", var.maintenance_start_hour)}:00:00Z"
+  maintenance_end_time   = var.maintenance_end_time != "" ? var.maintenance_end_time : "${formatdate("YYYY-MM-DD", timeadd(local.next_saturday, "0h"))}T${format("%02d", var.maintenance_start_hour + var.maintenance_duration_hours)}:00:00Z"
 }
 
 # Data source for available zones
@@ -174,11 +180,11 @@ resource "google_container_cluster" "yugabyte_cluster" {
     services_secondary_range_name = "services"
   }
 
-  # Master authorized networks (optional)
+  # Master authorized networks - restrict to specific ranges
   master_authorized_networks_config {
     cidr_blocks {
-      cidr_block   = "0.0.0.0/0"
-      display_name = "All networks"
+      cidr_block   = var.master_authorized_networks
+      display_name = "Authorized networks"
     }
   }
 
@@ -243,8 +249,8 @@ resource "google_container_cluster" "yugabyte_cluster" {
         "https://www.googleapis.com/auth/trace.append"
       ]
 
-      disk_size    = 100
-      disk_type    = "pd-standard"
+          disk_size    = 100
+    disk_type    = "pd-ssd"  # ✅ FIXED: Use SSD for auto-provisioned nodes
       image_type   = "COS_CONTAINERD"
 
       shielded_instance_config {
@@ -254,22 +260,25 @@ resource "google_container_cluster" "yugabyte_cluster" {
     }
   }
 
-  # Maintenance policy (disabled for deployment simplicity)
-  # maintenance_policy {
-  #   recurring_window {
-  #     start_time = local.maintenance_start_time
-  #     end_time   = local.maintenance_end_time
-  #     recurrence = "FREQ=WEEKLY;BYDAY=SA"
-  #   }
-  # }
+  # ✅ FIXED: Proper maintenance policy with calculated windows
+  maintenance_policy {
+    recurring_window {
+      start_time = local.maintenance_start_time
+      end_time   = local.maintenance_end_time
+      recurrence = var.maintenance_recurrence
+    }
+  }
 
-  # Monitoring and logging (minimal for cost optimization)
+  # ✅ FIXED: Enhanced monitoring and logging for production
   monitoring_config {
-    enable_components = ["SYSTEM_COMPONENTS"]
+    enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"]
+    managed_prometheus {
+      enabled = var.monitoring_enabled
+    }
   }
 
   logging_config {
-    enable_components = ["SYSTEM_COMPONENTS"]
+    enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"]
   }
 
   depends_on = [

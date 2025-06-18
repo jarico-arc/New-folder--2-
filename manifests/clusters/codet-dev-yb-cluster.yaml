@@ -21,15 +21,15 @@ spec:
   master:
     replicas: 1  # Reduced from 3 for cost savings
     storage:
-      size: 10Gi  # Reduced from 20Gi
-      storageClass: pd-standard  # Changed from standard-rwo for cost
+      size: 20Gi  # Increased for better dev experience
+      storageClass: pd-ssd  # Consistent with production for testing
     resources:
       requests:
-        cpu: "0.5"      # Minimal CPU
-        memory: 1Gi     # Minimal memory
+        cpu: "1"        # Increased for stability
+        memory: 2Gi     # Increased for stability
       limits:
-        cpu: "1"        # Low limit
-        memory: 2Gi     # Low limit
+        cpu: "2"        # Increased limit
+        memory: 4Gi     # Increased limit
     # Simplified affinity
     affinity:
       nodeAffinity:
@@ -51,15 +51,15 @@ spec:
   tserver:
     replicas: 1  # Reduced from 3 for single node setup
     storage:
-      size: 20Gi  # Reduced from 100Gi
-      storageClass: pd-standard  # Changed for cost optimization
+      size: 50Gi  # Increased for better dev experience
+      storageClass: pd-ssd  # Consistent with production for testing
     resources:
       requests:
-        cpu: "1"        # Consistent baseline
-        memory: 2Gi     # Reduced memory
+        cpu: "2"        # Increased for database workload
+        memory: 4Gi     # Increased for database workload
       limits:
-        cpu: "1"        # Reduced for cost
-        memory: 2Gi     # Reduced for cost
+        cpu: "4"        # Increased limit for better performance
+        memory: 8Gi     # Increased limit for database operations
     # Add tolerations for dedicated tserver nodes
     tolerations:
     - key: "yugabyte.com/tserver"
@@ -99,10 +99,10 @@ spec:
   serviceMonitor:
     enabled: false
 
-  # Minimal resource quotas
+  # Updated resource quotas
   resourceQuota:
     enabled: true
     hard:
-      requests.cpu: "3"      # Low limits
-      requests.memory: "4Gi" # Reduced memory quota
-      persistentvolumeclaims: "3" 
+      requests.cpu: "6"      # Increased to match new allocations (1+2+buffer)
+      requests.memory: "12Gi" # Increased to match new allocations (2+4+buffer)
+      persistentvolumeclaims: "6" 
