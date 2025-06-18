@@ -22,9 +22,8 @@ This repository implements a comprehensive YugabyteDB multi-environment deployme
 ├── scripts/                          # Deployment automation scripts
 │   ├── install-operator.sh           # Install YugabyteDB operator (Linux/macOS)
 │   ├── deploy-all-environments.sh    # Deploy all three environments
-│   ├── scale-cluster.sh              # Scale individual clusters
-│   ├── setup-database-rbac.sh       # Configure database security
-│   └── setup-windows.ps1            # Windows PowerShell deployment script
+  │   ├── scale-cluster.sh              # Scale individual clusters
+  │   └── setup-database-rbac.sh       # Configure database security and RBAC
 │
 ├── sql/                              # Database schema and security templates
 │   ├── rbac-setup.sql               # RBAC setup template

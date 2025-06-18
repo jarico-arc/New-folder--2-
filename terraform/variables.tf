@@ -105,7 +105,7 @@ variable "general_max_nodes" {
 variable "tserver_machine_type" {
   description = "Machine type for YugabyteDB TServer nodes"
   type        = string
-  default     = "e2-standard-2"
+  default     = "e2-small"
 }
 
 variable "tserver_min_nodes" {
@@ -210,4 +210,18 @@ variable "maintenance_recurrence" {
   description = "Maintenance window recurrence (RFC5545 RRULE)"
   type        = string
   default     = "FREQ=WEEKLY;BYDAY=SA"
-} 
+}
+
+# For production cluster only:
+replicationFactor: 3
+master:
+  replicas: 3
+tserver:
+  replicas: 3
+enableAuth: true
+tls:
+  enabled: true
+
+# Extremely limited resources:
+cpu: "0.5"      # May cause performance issues
+memory: 1Gi     # May cause OOM kills 

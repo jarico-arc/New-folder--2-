@@ -111,7 +111,7 @@ Alert Severity Levels:
   - YAML linting and validation
   - Security scanning with Trivy
   - Kind cluster testing
-  - PowerShell script validation
+  - Bash script validation with shellcheck
   - Multi-environment deployment pipeline
 
 ### 2. Automated Deployment

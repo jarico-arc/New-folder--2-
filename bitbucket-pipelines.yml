@@ -59,12 +59,13 @@ pipelines:
               - echo "✅ Terraform validation completed"
               
         - step:
-            name: PowerShell Script Validation
-            image: mcr.microsoft.com/powershell:lts-ubuntu-22.04
+            name: Script Validation
+            image: ubuntu:22.04
             script:
-              - echo "🔍 Validating PowerShell scripts..."
-              - pwsh -Command "Get-ChildItem -Path scripts -Filter '*.ps1' | ForEach-Object { Write-Host 'Checking' $_.Name }"
-              - echo "✅ PowerShell validation completed"
+              - echo "🔍 Validating deployment scripts..."
+              - apt-get update && apt-get install -y shellcheck
+              - find scripts -name "*.sh" -exec shellcheck {} \;
+              - echo "✅ Script validation completed"
 
   branches:
     main:

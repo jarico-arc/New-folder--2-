@@ -173,8 +173,8 @@ output "estimated_monthly_cost_info" {
     note = "Estimated costs depend on actual usage and Google Cloud pricing"
     components = {
       gke_cluster_management = "Free (GKE cluster management)"
-      general_nodes         = "~$146/month per e2-standard-4 node (if running 24/7)"
-      tserver_nodes        = "~$350/month per n2-highmem-4 node (if running 24/7)"
+      general_nodes         = "~$5/month per e2-micro node (if running 24/7)"
+      tserver_nodes        = "~$15/month per e2-small node (if running 24/7)"
       network_egress       = "Variable based on traffic"
       persistent_disks     = "~$0.17/GB/month for SSD disks"
       load_balancers       = "~$18/month per load balancer"
