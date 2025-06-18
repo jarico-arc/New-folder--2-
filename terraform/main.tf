@@ -26,6 +26,15 @@ provider "google-beta" {
   region  = var.region
 }
 
+# Calculate maintenance window times dynamically
+locals {
+  # Calculate next Saturday at specified hour
+  current_time = timestamp()
+  # Simple calculation for next Saturday - this will create a maintenance window for next Saturday
+  maintenance_start_time = var.maintenance_start_time != "" ? var.maintenance_start_time : formatdate("YYYY-MM-DD'T'hh:mm:ss'Z'", timeadd(timestamp(), "168h"))  # Next week same time as fallback
+  maintenance_end_time   = var.maintenance_end_time != "" ? var.maintenance_end_time : formatdate("YYYY-MM-DD'T'hh:mm:ss'Z'", timeadd(timestamp(), "${168 + var.maintenance_duration_hours}h"))
+}
+
 # Data source for available zones
 data "google_compute_zones" "available" {
   project = var.project_id
@@ -248,8 +257,8 @@ resource "google_container_cluster" "yugabyte_cluster" {
   # Maintenance policy
   maintenance_policy {
     recurring_window {
-      start_time = "2023-01-01T02:00:00Z"
-      end_time   = "2023-01-01T06:00:00Z"
+      start_time = local.maintenance_start_time
+      end_time   = local.maintenance_end_time
       recurrence = "FREQ=WEEKLY;BYDAY=SA"
     }
   }

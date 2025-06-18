@@ -1,135 +1,164 @@
-# AlertManager Rules for YugabyteDB
-# Critical alerts for database health and performance
+# Prometheus Alert Rules for YugabyteDB
+# This file defines alerting rules for monitoring YugabyteDB health and performance
 
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: prometheus-alert-rules
+  name: yugabytedb-alert-rules
   namespace: monitoring
+  labels:
+    app: prometheus
 data:
-  yugabytedb-alerts.yml: |
+  yugabytedb.yml: |
     groups:
     - name: yugabytedb.rules
       rules:
-      
       # Master Node Alerts
-      - alert: YugabyteMasterDown
+      - alert: YBMasterDown
         expr: up{job="yugabytedb-master"} == 0
         for: 1m
         labels:
           severity: critical
-          component: master
         annotations:
           summary: "YugabyteDB Master node is down"
-          description: "Master node {{$labels.pod}} in namespace {{$labels.namespace}} has been down for more than 1 minute."
-      
-      - alert: YugabyteMasterQuorumLoss
-        expr: count(up{job="yugabytedb-master"} == 1) by (namespace) < 2
-        for: 30s
+          description: "YugabyteDB Master node {{ $labels.instance }} in namespace {{ $labels.namespace }} has been down for more than 1 minute."
+
+      - alert: YBMasterQuorumLost
+        expr: sum(up{job="yugabytedb-master"}) by (namespace) < 2
+        for: 2m
         labels:
           severity: critical
-          component: master
         annotations:
           summary: "YugabyteDB Master quorum lost"
-          description: "Less than 2 master nodes are available in namespace {{$labels.namespace}}. Cluster may become unavailable."
-      
+          description: "YugabyteDB Master quorum lost in namespace {{ $labels.namespace }}. Only {{ $value }} masters are available."
+
       # TServer Node Alerts
-      - alert: YugabyteTServerDown
+      - alert: YBTServerDown
         expr: up{job="yugabytedb-tserver"} == 0
         for: 2m
         labels:
           severity: warning
-          component: tserver
         annotations:
           summary: "YugabyteDB TServer node is down"
-          description: "TServer node {{$labels.pod}} in namespace {{$labels.namespace}} has been down for more than 2 minutes."
-      
-      - alert: YugabyteTServerMajorityDown
-        expr: count(up{job="yugabytedb-tserver"} == 1) by (namespace) < count(up{job="yugabytedb-tserver"}) by (namespace) / 2
+          description: "YugabyteDB TServer node {{ $labels.instance }} in namespace {{ $labels.namespace }} has been down for more than 2 minutes."
+
+      - alert: YBTServerCriticallyLow
+        expr: sum(up{job="yugabytedb-tserver"}) by (namespace) < 2
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YugabyteDB TServer count critically low"
+          description: "Only {{ $value }} TServer nodes available in namespace {{ $labels.namespace }}. This may affect data availability."
+
+      # Resource Usage Alerts
+      - alert: YBHighCPUUsage
+        expr: (rate(cpu_usage_user{job="yugabytedb-tserver"}[5m]) + rate(cpu_usage_system{job="yugabytedb-tserver"}[5m])) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YugabyteDB high CPU usage"
+          description: "YugabyteDB TServer {{ $labels.instance }} CPU usage is above 80% for more than 10 minutes."
+
+      - alert: YBHighMemoryUsage
+        expr: memory_usage{job="yugabytedb-tserver"} / memory_limit{job="yugabytedb-tserver"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YugabyteDB high memory usage"
+          description: "YugabyteDB TServer {{ $labels.instance }} memory usage is above 90% for more than 5 minutes."
+
+      # Connection Alerts
+      - alert: YBHighConnectionCount
+        expr: yb_node_connections{job="yugabytedb-tserver"} > 100
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YugabyteDB high connection count"
+          description: "YugabyteDB TServer {{ $labels.instance }} has more than 100 connections for 15 minutes."
+
+      # Disk Usage Alerts
+      - alert: YBHighDiskUsage
+        expr: disk_usage_percent{job="yugabytedb-tserver"} > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YugabyteDB high disk usage"
+          description: "YugabyteDB TServer {{ $labels.instance }} disk usage is above 85%."
+
+      - alert: YBCriticalDiskUsage
+        expr: disk_usage_percent{job="yugabytedb-tserver"} > 95
         for: 1m
         labels:
           severity: critical
-          component: tserver
         annotations:
-          summary: "Majority of YugabyteDB TServer nodes are down"
-          description: "More than half of TServer nodes are down in namespace {{$labels.namespace}}."
-      
-      # Performance Alerts
-      - alert: YugabyteHighLatency
-        expr: histogram_quantile(0.95, rate(yb_tserver_ysql_operation_latency_bucket[5m])) > 100
+          summary: "YugabyteDB critical disk usage"
+          description: "YugabyteDB TServer {{ $labels.instance }} disk usage is above 95%. Immediate action required."
+
+      # Replication Lag Alerts
+      - alert: YBHighReplicationLag
+        expr: replication_lag_ms{job="yugabytedb-tserver"} > 10000
         for: 5m
         labels:
           severity: warning
-          component: performance
         annotations:
-          summary: "High YSQL operation latency"
-          description: "95th percentile latency is {{$value}}ms in namespace {{$labels.namespace}}, pod {{$labels.pod}}."
-      
-      - alert: YugabyteHighConnectionCount
-        expr: yb_node_connections > 80
-        for: 5m
-        labels:
-          severity: warning
-          component: connections
-        annotations:
-          summary: "High connection count on YugabyteDB"
-          description: "Connection count is {{$value}} on pod {{$labels.pod}} in namespace {{$labels.namespace}}."
-      
-      # Storage Alerts
-      - alert: YugabyteHighDiskUsage
-        expr: (yb_disk_usage_bytes / yb_disk_capacity_bytes) * 100 > 80
-        for: 5m
-        labels:
-          severity: warning
-          component: storage
-        annotations:
-          summary: "High disk usage on YugabyteDB node"
-          description: "Disk usage is {{$value}}% on pod {{$labels.pod}} in namespace {{$labels.namespace}}."
-      
-      - alert: YugabyteCriticalDiskUsage
-        expr: (yb_disk_usage_bytes / yb_disk_capacity_bytes) * 100 > 90
+          summary: "YugabyteDB high replication lag"
+          description: "YugabyteDB replication lag is higher than 10 seconds on {{ $labels.instance }}."
+
+      # Cluster Health Alerts
+      - alert: YBClusterUnhealthy
+        expr: cluster_health_status{job="yugabytedb-master"} != 0
         for: 2m
         labels:
           severity: critical
-          component: storage
         annotations:
-          summary: "Critical disk usage on YugabyteDB node"
-          description: "Disk usage is {{$value}}% on pod {{$labels.pod}} in namespace {{$labels.namespace}}. Immediate action required."
-      
-      # Memory Alerts
-      - alert: YugabyteHighMemoryUsage
-        expr: (container_memory_usage_bytes{pod=~".*yb-.*"} / container_spec_memory_limit_bytes) * 100 > 85
+          summary: "YugabyteDB cluster is unhealthy"
+          description: "YugabyteDB cluster in namespace {{ $labels.namespace }} is reporting unhealthy status."
+
+      # Network Partition Alerts
+      - alert: YBNetworkPartition
+        expr: increase(network_errors_total{job="yugabytedb-tserver"}[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YugabyteDB network errors detected"
+          description: "YugabyteDB TServer {{ $labels.instance }} is experiencing network errors. This may indicate network partition."
+
+    # General Kubernetes Alerts for YugabyteDB
+    - name: yugabytedb-kubernetes.rules
+      rules:
+      - alert: YBPodCrashLooping
+        expr: rate(kube_pod_container_status_restarts_total{container=~"yb-.*"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "YugabyteDB pod is crash looping"
+          description: "YugabyteDB pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is crash looping."
+
+      - alert: YBPodNotReady
+        expr: kube_pod_status_ready{condition="false", pod=~".*yb.*"} == 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "YugabyteDB pod not ready"
+          description: "YugabyteDB pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has been not ready for more than 10 minutes."
+
+      - alert: YBPersistentVolumeClaimPending
+        expr: kube_persistentvolumeclaim_status_phase{phase="Pending", persistentvolumeclaim=~".*yb.*"} == 1
         for: 5m
         labels:
           severity: warning
-          component: memory
         annotations:
-          summary: "High memory usage on YugabyteDB pod"
-          description: "Memory usage is {{$value}}% on pod {{$labels.pod}} in namespace {{$labels.namespace}}."
-      
-      # Production-specific alerts
-      - alert: YugabyteProductionTServerDown
-        expr: up{job="yugabytedb-tserver",namespace="codet-prod-yb"} == 0
-        for: 30s
-        labels:
-          severity: critical
-          component: tserver
-          environment: production
-        annotations:
-          summary: "PRODUCTION: YugabyteDB TServer node is down"
-          description: "PRODUCTION TServer node {{$labels.pod}} has been down for more than 30 seconds."
-      
-      - alert: YugabyteProductionMasterDown
-        expr: up{job="yugabytedb-master",namespace="codet-prod-yb"} == 0
-        for: 15s
-        labels:
-          severity: critical
-          component: master
-          environment: production
-        annotations:
-          summary: "PRODUCTION: YugabyteDB Master node is down"
-          description: "PRODUCTION Master node {{$labels.pod}} has been down for more than 15 seconds."
+          summary: "YugabyteDB PVC is pending"
+          description: "PersistentVolumeClaim {{ $labels.persistentvolumeclaim }} for YugabyteDB in namespace {{ $labels.namespace }} is pending."
 
 ---
 # AlertManager Configuration

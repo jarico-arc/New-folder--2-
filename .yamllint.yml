@@ -1,43 +1,64 @@
-# YAMLLint Configuration for YugabyteDB Project
+# YAML Linting Rules for YugabyteDB Project
+# Configuration for yamllint to ensure consistent YAML formatting
 
 extends: default
 
 rules:
-  # Line length
+  # Line length can be longer for Kubernetes manifests
   line-length:
     max: 120
     level: warning
-  
-  # Indentation
+
+  # Allow longer comments for documentation
+  comments:
+    min-spaces-from-content: 1
+    require-starting-space: true
+
+  # Be more lenient with indentation for complex Kubernetes structures
   indentation:
     spaces: 2
     indent-sequences: true
     check-multi-line-strings: false
-  
-  # Comments
-  comments:
-    min-spaces-from-content: 1
-  
-  # Document markers
-  document-start:
-    present: false
-  
-  # Truthy values
-  truthy:
-    allowed-values: ['true', 'false']
-    check-keys: false
-  
-  # Key ordering
-  key-ordering: disable
-  
-  # Octal values
-  octal-values: disable
-  
-  # Empty lines
+
+  # Allow empty lines for readability
   empty-lines:
     max: 2
-    max-start: 0
+    max-start: 1
     max-end: 1
+
+  # Allow truthy values common in Kubernetes
+  truthy:
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
+    check-keys: false
+
+  # Allow long lines in comments for URLs and examples
+  comments-indentation: {}
+
+  # Allow document separators (---)
+  document-start:
+    present: false
+
+  # Allow multiple documents in one file
+  document-end:
+    present: false
+
+  # Allow empty values in Kubernetes manifests
+  empty-values:
+    forbid-in-block-mappings: false
+    forbid-in-flow-mappings: false
+
+  # Allow key duplicates in some cases (common in Kubernetes)
+  key-duplicates: {}
+
+  # Allow octal values (common in file permissions)
+  octal-values:
+    forbid-implicit-octal: false
+    forbid-explicit-octal: false
+
+  # Allow quoted strings
+  quoted-strings:
+    quote-type: any
+    required: false
 
 ignore: |
   .git/

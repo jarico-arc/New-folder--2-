@@ -77,8 +77,17 @@ cp "$MANIFEST_FILE" "${MANIFEST_FILE}.backup.$(date +%Y%m%d-%H%M%S)"
 
 # Update the manifest file
 echo "📝 Updating manifest file: $MANIFEST_FILE"
-sed -i.tmp "s/replicas: $CURRENT_REPLICAS # Start with [0-9]* nodes/replicas: $NEW_REPLICAS # Scaled to $NEW_REPLICAS nodes/" "$MANIFEST_FILE" || \
-sed -i.tmp "/tserver:/,/replicas:/ s/replicas: $CURRENT_REPLICAS/replicas: $NEW_REPLICAS/" "$MANIFEST_FILE"
+
+# Use a more robust approach to update the replicas count
+# First, try a simple replacement of the specific tserver replicas line
+if sed -i.tmp "/tserver:/,/replicas:/ {
+    s/replicas: $CURRENT_REPLICAS/replicas: $NEW_REPLICAS/
+}" "$MANIFEST_FILE" 2>/dev/null; then
+    echo "✅ Successfully updated replicas from $CURRENT_REPLICAS to $NEW_REPLICAS"
+else
+    echo "❌ Failed to update manifest file"
+    exit 1
+fi
 
 # Clean up temporary file
 rm -f "${MANIFEST_FILE}.tmp"

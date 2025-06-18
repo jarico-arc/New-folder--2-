@@ -74,19 +74,34 @@ setup_environment_rbac() {
     # Get the YSQL service
     local ysql_service="${cluster_name}-yb-tserver-service"
     
+    # Check if netcat is available for connection testing
+    if ! command -v nc &> /dev/null; then
+        echo "⚠️  netcat (nc) not found. Will skip connection test."
+        echo "   Please ensure netcat is installed for better reliability."
+    fi
+    
     # Port forward to connect to the database
     echo "🔌 Setting up connection to $environment database..."
     kubectl port-forward -n $namespace svc/$ysql_service 5433:5433 &
     local port_forward_pid=$!
     
+    # Set up cleanup trap for this specific port forward
+    trap "kill $port_forward_pid 2>/dev/null || true; sleep 2" EXIT
+    
     # Wait a moment for port forward to establish
     sleep 5
     
-    # Check if we can connect
-    if ! nc -z localhost 5433 2>/dev/null; then
-        echo "❌ Cannot connect to $environment database"
-        kill $port_forward_pid 2>/dev/null || true
-        return 1
+    # Check if we can connect (if netcat is available)
+    if command -v nc &> /dev/null; then
+        if ! nc -z localhost 5433 2>/dev/null; then
+            echo "❌ Cannot connect to $environment database"
+            kill $port_forward_pid 2>/dev/null || true
+            sleep 2
+            return 1
+        fi
+    else
+        echo "⚠️  Skipping connection test (netcat not available)"
+        echo "   Proceeding with database operations..."
     fi
     
     echo "✅ Connected to $environment database"
@@ -276,9 +291,19 @@ EOF
     fi
     
     # Clean up
-    kill $port_forward_pid 2>/dev/null || true
+    echo "🧹 Cleaning up resources for $environment..."
+    if [ ! -z "$port_forward_pid" ]; then
+        kill $port_forward_pid 2>/dev/null || true
+        # Wait for graceful termination
+        sleep 3
+        # Force kill if still running
+        if kill -0 $port_forward_pid 2>/dev/null; then
+            kill -9 $port_forward_pid 2>/dev/null || true
+        fi
+    fi
     rm -f $temp_sql
-    sleep 2  # Give port-forward time to clean up
+    # Clear the trap for this function
+    trap - EXIT
 }
 
 # Setup RBAC for all environments

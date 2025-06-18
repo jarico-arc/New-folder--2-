@@ -78,9 +78,9 @@ output "yugabyte_tserver_node_pool_name" {
 
 # Service Account Outputs (Future)
 output "cluster_service_account" {
-  description = "Service account used by the GKE cluster"
-  value       = google_container_cluster.yugabyte_cluster.node_config.0.service_account
-  sensitive   = true
+  description = "Default compute service account for the cluster nodes"
+  value       = "${var.project_id}-compute@developer.gserviceaccount.com"  # Default GKE service account
+  sensitive   = false
 }
 
 # Connection Information

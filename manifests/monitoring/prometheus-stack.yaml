@@ -201,6 +201,21 @@ data:
     }
 
 ---
+# Grafana Admin Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin-secret
+  namespace: monitoring
+type: Opaque
+data:
+  # admin-password: Generated base64 encoded strong password
+  # Use: echo -n "your-strong-password" | base64
+  admin-password: R3JhZmFuYUFkbWluUGFzcw==  # GrafanaAdminPass (change this!)
+stringData:
+  admin-user: admin
+
+---
 # Grafana Deployment
 apiVersion: apps/v1
 kind: Deployment
@@ -223,15 +238,34 @@ spec:
         ports:
         - containerPort: 3000
         env:
+        - name: GF_SECURITY_ADMIN_USER
+          valueFrom:
+            secretKeyRef:
+              name: grafana-admin-secret
+              key: admin-user
         - name: GF_SECURITY_ADMIN_PASSWORD
-          value: "admin123"  # Change this in production!
+          valueFrom:
+            secretKeyRef:
+              name: grafana-admin-secret
+              key: admin-password
         - name: GF_INSTALL_PLUGINS
           value: "grafana-piechart-panel"
+        - name: GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION
+          value: "false"
+        - name: GF_SECURITY_ADMIN_PASSWORD_POLICY
+          value: "true"
         volumeMounts:
         - name: grafana-storage
           mountPath: /var/lib/grafana
         - name: grafana-dashboards
           mountPath: /etc/grafana/provisioning/dashboards
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 472
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
       volumes:
       - name: grafana-storage
         emptyDir: {}

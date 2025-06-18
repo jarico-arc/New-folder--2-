@@ -22,7 +22,7 @@ spec:
     replicas: 1  # Reduced from 3 for cost savings
     storage:
       size: 10Gi  # Reduced from 20Gi
-      storageClass: standard-rwo
+      storageClass: pd-standard  # Changed from standard-rwo for better consistency
     resources:
       requests:
         cpu: "0.5"      # Reduced significantly
@@ -42,24 +42,30 @@ spec:
               values:
               - e2-standard-2
               - e2-standard-4
-    # Disable expensive features for cost savings
-    enableAuth: false  # Disabled for minimal cost
+    # Enable security in staging for production consistency
+    enableAuth: true   # Changed from false - enable auth for security consistency
     tls:
-      enabled: false   # Disabled for minimal cost
+      enabled: true    # Changed from false - enable TLS for security consistency
 
   # T-Server Node Configuration (minimal staging)
   tserver:
     replicas: 1  # Reduced from 3 for single node setup
     storage:
       size: 20Gi  # Reduced from 100Gi
-      storageClass: standard-rwo
+      storageClass: pd-standard  # Changed from standard-rwo for better consistency
     resources:
       requests:
-        cpu: "1"        # Reduced from 3-4
-        memory: 2Gi     # Reduced from 6-8Gi
+        cpu: "1"        # Consistent baseline
+        memory: 2Gi     # Consistent baseline
       limits:
-        cpu: "1"        # Reduced from 4
-        memory: 3Gi     # Reduced from 8Gi
+        cpu: "2"        # Increased from 1 for proper headroom
+        memory: 4Gi     # Increased from 3Gi for proper headroom
+    # Add tolerations for dedicated tserver nodes
+    tolerations:
+    - key: "yugabyte.com/tserver"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
     # Simplified affinity
     affinity:
       nodeAffinity:
@@ -71,14 +77,22 @@ spec:
               operator: In
               values:
               - e2-standard-2
-    # Disable expensive features for cost savings
-    enableAuth: false  # Disabled for minimal cost
+        # Prefer tserver nodes if available
+        - weight: 80
+          preference:
+            matchExpressions:
+            - key: node-pool
+              operator: In
+              values:
+              - yugabyte-tserver
+    # Enable security in staging for production consistency
+    enableAuth: true   # Changed from false - enable auth for security consistency
     tls:
-      enabled: false   # Disabled for minimal cost
+      enabled: true    # Changed from false - enable TLS for security consistency
 
-  # Disable monitoring for cost savings
+  # Enable monitoring for staging visibility
   monitoring:
-    enabled: false  # Disabled for cost savings
+    enabled: true      # Changed from false - enable monitoring for staging visibility
 
   # Minimal resource quotas
   resourceQuota:

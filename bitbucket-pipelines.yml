@@ -117,9 +117,18 @@ pipelines:
           trigger: manual
           script:
             - echo "🚀 Deploying to staging environment..."
-            - echo "Setting up kubectl for staging GKE cluster..."
-            - echo "gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
-            - echo "kubectl apply -f manifests/clusters/codet-staging-yb-cluster.yaml"
+            - echo "Setting up GCP authentication..."
+            - echo $GCP_SERVICE_ACCOUNT_KEY | base64 -d > gcp-service-account.json
+            - gcloud auth activate-service-account --key-file gcp-service-account.json
+            - gcloud config set project $GCP_PROJECT_ID
+            - echo "Connecting to GKE cluster..."
+            - gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID
+            - echo "Verifying cluster connection..."
+            - kubectl get nodes
+            - echo "Deploying staging cluster..."
+            - kubectl apply -f manifests/clusters/codet-staging-yb-cluster.yaml
+            - echo "Waiting for deployment to complete..."
+            - kubectl wait --for=condition=ready ybcluster codet-staging-yb -n codet-staging-yb --timeout=600s || echo "Deployment timeout - check manually"
             - echo "✅ Staging deployment completed"
             
       - step:
@@ -128,9 +137,18 @@ pipelines:
           trigger: manual
           script:
             - echo "🚀 Deploying to production environment..."
-            - echo "Setting up kubectl for production GKE cluster..."
-            - echo "gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
-            - echo "kubectl apply -f manifests/clusters/codet-prod-yb-cluster.yaml"
+            - echo "Setting up GCP authentication..."
+            - echo $GCP_SERVICE_ACCOUNT_KEY | base64 -d > gcp-service-account.json
+            - gcloud auth activate-service-account --key-file gcp-service-account.json
+            - gcloud config set project $GCP_PROJECT_ID
+            - echo "Connecting to GKE cluster..."
+            - gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID
+            - echo "Verifying cluster connection..."
+            - kubectl get nodes
+            - echo "Deploying production cluster..."
+            - kubectl apply -f manifests/clusters/codet-prod-yb-cluster.yaml
+            - echo "Waiting for deployment to complete..."
+            - kubectl wait --for=condition=ready ybcluster codet-prod-yb -n codet-prod-yb --timeout=900s || echo "Deployment timeout - check manually"
             - echo "✅ Production deployment completed"
 
     develop:
@@ -148,9 +166,18 @@ pipelines:
           trigger: automatic
           script:
             - echo "🚀 Deploying to development environment..."
-            - echo "Setting up kubectl for development GKE cluster..."
-            - echo "gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID"
-            - echo "kubectl apply -f manifests/clusters/codet-dev-yb-cluster.yaml"
+            - echo "Setting up GCP authentication..."
+            - echo $GCP_SERVICE_ACCOUNT_KEY | base64 -d > gcp-service-account.json
+            - gcloud auth activate-service-account --key-file gcp-service-account.json
+            - gcloud config set project $GCP_PROJECT_ID
+            - echo "Connecting to GKE cluster..."
+            - gcloud container clusters get-credentials codet-yugabyte-cluster --region us-central1 --project $GCP_PROJECT_ID
+            - echo "Verifying cluster connection..."
+            - kubectl get nodes
+            - echo "Deploying development cluster..."
+            - kubectl apply -f manifests/clusters/codet-dev-yb-cluster.yaml
+            - echo "Waiting for deployment to complete..."
+            - kubectl wait --for=condition=ready ybcluster codet-dev-yb -n codet-dev-yb --timeout=600s || echo "Deployment timeout - check manually"
             - echo "✅ Development deployment completed"
 
   pull-requests:

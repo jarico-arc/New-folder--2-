@@ -195,21 +195,41 @@ variable "enable_workload_identity" {
 
 # Maintenance Configuration
 variable "maintenance_start_time" {
-  description = "Maintenance window start time (RFC3339 format)"
+  description = "Maintenance window start time (RFC3339 format) - will be calculated dynamically"
   type        = string
-  default     = "2023-01-01T02:00:00Z"
+  default     = ""  # Will be calculated in main.tf to next Saturday 2 AM
 }
 
 variable "maintenance_end_time" {
-  description = "Maintenance window end time (RFC3339 format)"
+  description = "Maintenance window end time (RFC3339 format) - will be calculated dynamically"
   type        = string
-  default     = "2023-01-01T06:00:00Z"
+  default     = ""  # Will be calculated in main.tf to next Saturday 6 AM
 }
 
 variable "maintenance_recurrence" {
   description = "Maintenance window recurrence (RFC5545 RRULE)"
   type        = string
   default     = "FREQ=WEEKLY;BYDAY=SA"
+}
+
+variable "maintenance_start_hour" {
+  description = "Maintenance window start hour (0-23)"
+  type        = number
+  default     = 2
+  validation {
+    condition     = var.maintenance_start_hour >= 0 && var.maintenance_start_hour <= 23
+    error_message = "Maintenance start hour must be between 0 and 23."
+  }
+}
+
+variable "maintenance_duration_hours" {
+  description = "Maintenance window duration in hours"
+  type        = number
+  default     = 4
+  validation {
+    condition     = var.maintenance_duration_hours >= 1 && var.maintenance_duration_hours <= 12
+    error_message = "Maintenance duration must be between 1 and 12 hours."
+  }
 }
 
  

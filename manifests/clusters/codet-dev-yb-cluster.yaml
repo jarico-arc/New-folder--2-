@@ -22,14 +22,14 @@ spec:
     replicas: 1  # Reduced from 3 for cost savings
     storage:
       size: 5Gi  # Reduced from 10Gi
-      storageClass: standard-rwo
+      storageClass: pd-standard  # Changed from standard-rwo for better consistency
     resources:
       requests:
-        cpu: "0.5"      # Reduced from 1
-        memory: 1Gi     # Reduced from 2Gi
+        cpu: "0.5"      # Consistent with limits
+        memory: 1Gi     # Consistent with limits
       limits:
-        cpu: "0.5"      # Reduced from 1
-        memory: 1Gi     # Reduced from 2Gi
+        cpu: "1"        # Increased from 0.5 for headroom
+        memory: 2Gi     # Increased from 1Gi for headroom
     # Simplified affinity for single replica
     affinity:
       nodeAffinity:
@@ -42,17 +42,17 @@ spec:
               values:
               - e2-standard-2
               - e2-micro
-    # Disable expensive features for cost savings
-    enableAuth: false  # Disabled for minimal cost
+    # Enable security even in dev for consistency and testing
+    enableAuth: true   # Changed from false - enable auth for security consistency
     tls:
-      enabled: false   # Disabled for minimal cost
+      enabled: true    # Changed from false - enable TLS for security consistency
 
   # T-Server Node Configuration (minimal resources)
   tserver:
     replicas: 1  # Reduced from 3 for single node setup
     storage:
       size: 10Gi  # Reduced from 50Gi
-      storageClass: standard-rwo
+      storageClass: pd-standard  # Changed from standard-rwo for better consistency
     resources:
       requests:
         cpu: "0.5"      # Reduced from 2
@@ -60,6 +60,12 @@ spec:
       limits:
         cpu: "1"        # Reduced from 2
         memory: 2Gi     # Reduced from 4Gi
+    # Add tolerations for dedicated tserver nodes
+    tolerations:
+    - key: "yugabyte.com/tserver"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
     # Simplified affinity for single replica
     affinity:
       nodeAffinity:
@@ -72,14 +78,22 @@ spec:
               values:
               - e2-standard-2
               - e2-standard-4
-    # Disable expensive features for cost savings
-    enableAuth: false  # Disabled for minimal cost
+        # Prefer tserver nodes if available
+        - weight: 80
+          preference:
+            matchExpressions:
+            - key: node-pool
+              operator: In
+              values:
+              - yugabyte-tserver
+    # Enable security even in dev for consistency and testing
+    enableAuth: true   # Changed from false - enable auth for security consistency
     tls:
-      enabled: false   # Disabled for minimal cost
+      enabled: true    # Changed from false - enable TLS for security consistency
 
-  # Disable monitoring for cost savings
+  # Enable monitoring for visibility into dev environment
   monitoring:
-    enabled: false  # Disabled for cost savings
+    enabled: true      # Changed from false - enable monitoring for dev visibility
 
   # Minimal resource quotas
   resourceQuota:

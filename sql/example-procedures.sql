@@ -309,7 +309,15 @@ $$;
 -- GRANT PERMISSIONS TO APPLICATION ROLE
 -- =====================================================
 
--- Replace {ENVIRONMENT} with actual environment name when deploying
+-- NOTE: Replace {ENVIRONMENT} with actual environment name (dev, staging, prod) when deploying
+-- For automated deployment, use the setup-database-rbac.sh script which handles this replacement
+
+-- Example grants (replace {ENVIRONMENT} with dev, staging, or prod):
+-- GRANT EXECUTE ON FUNCTION app_schema.create_user(VARCHAR, VARCHAR) TO codet_dev_app;
+-- GRANT EXECUTE ON FUNCTION app_schema.get_user_by_username(VARCHAR) TO codet_dev_app;
+-- etc.
+
+-- Template grants for script processing:
 GRANT EXECUTE ON FUNCTION app_schema.create_user(VARCHAR, VARCHAR) TO codet_{ENVIRONMENT}_app;
 GRANT EXECUTE ON FUNCTION app_schema.get_user_by_username(VARCHAR) TO codet_{ENVIRONMENT}_app;
 GRANT EXECUTE ON FUNCTION app_schema.update_user_email(INTEGER, VARCHAR) TO codet_{ENVIRONMENT}_app;
