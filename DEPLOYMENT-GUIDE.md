@@ -107,8 +107,14 @@ kubectl get pods -A | grep yb | grep Running
 ### Test Database Connectivity
 ```bash
 # Port forward to development environment
-kubectl port-forward -n codet-dev-yb svc/codet-dev-yb-yb-tserver-service 5433:5433 &
+# For VPC connections (recommended for production apps)
+# Deploy a test pod in the cluster:
+kubectl run postgres-client --rm -i --tty --image postgres:13 -- bash
+# Then connect directly via VPC:
+psql -h codet-dev-yb-yb-tserver-service.codet-dev-yb.svc.cluster.local -p 5433 -U yugabyte -d yugabyte -c "SELECT version();"
 
+# For external testing (development only)
+kubectl port-forward -n codet-dev-yb svc/codet-dev-yb-yb-tserver-service 5433:5433 &
 # Test connection (in another terminal)
 psql -h localhost -p 5433 -U yugabyte -d yugabyte -c "SELECT version();"
 ```
@@ -168,9 +174,9 @@ Your GKE cluster should have Cluster Autoscaler enabled. When you scale Yugabyte
 
 ## Connection Information
 
-### Database Connection Endpoints
+### VPC Database Connection Endpoints
 
-For applications running inside the cluster:
+**For applications running inside the GKE cluster:**
 
 ```yaml
 # Development
@@ -184,6 +190,18 @@ port: 5433
 # Production
 host: codet-prod-yb-yb-tserver-service.codet-prod-yb.svc.cluster.local
 port: 5433
+```
+
+**For applications running on GCE instances in the same VPC:**
+
+```bash
+# Get the internal load balancer IP for each environment
+kubectl get svc codet-dev-yb-yb-tserver-service -n codet-dev-yb
+kubectl get svc codet-staging-yb-yb-tserver-service -n codet-staging-yb  
+kubectl get svc codet-prod-yb-yb-tserver-service -n codet-prod-yb
+
+# Then connect using the internal IP
+psql -h <internal-lb-ip> -p 5433 -U <username> -d <database>
 ```
 
 ### Credentials

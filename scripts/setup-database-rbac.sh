@@ -91,10 +91,10 @@ setup_environment_rbac() {
     # Wait a moment for port forward to establish
     sleep 5
     
-    # Check if we can connect (if netcat is available)
+    # Check if we can connect via port-forward (if netcat is available)
     if command -v nc &> /dev/null; then
         if ! nc -z localhost 5433 2>/dev/null; then
-            echo "❌ Cannot connect to $environment database"
+            echo "❌ Cannot connect to $environment database via port-forward"
             kill $port_forward_pid 2>/dev/null || true
             sleep 2
             return 1
@@ -275,9 +275,13 @@ EOF
         echo "kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.admin-password}' | base64 -d" >> $creds_file
         echo "kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.app-password}' | base64 -d" >> $creds_file
         echo "" >> $creds_file
-        echo "Connection examples:" >> $creds_file
+        echo "VPC Connection (from within cluster):" >> $creds_file
         echo "export APP_PASSWORD=\$(kubectl get secret $secret_name -n $namespace -o jsonpath='{.data.app-password}' | base64 -d)" >> $creds_file
-        echo "psql -h <host> -p 5433 -U $app_role -d codet_${environment}" >> $creds_file
+        echo "psql -h $ysql_service.$namespace.svc.cluster.local -p 5433 -U $app_role -d codet_${environment}" >> $creds_file
+        echo "" >> $creds_file
+        echo "VPC Connection (from compute instances in same VPC):" >> $creds_file
+        echo "# Get internal load balancer IP: kubectl get svc $ysql_service -n $namespace" >> $creds_file
+        echo "psql -h <internal-lb-ip> -p 5433 -U $app_role -d codet_${environment}" >> $creds_file
         echo "" >> $creds_file
         echo "Available functions for $app_role:" >> $creds_file
         echo "- app_schema.create_user(username, email)" >> $creds_file

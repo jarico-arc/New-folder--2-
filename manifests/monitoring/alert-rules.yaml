@@ -170,7 +170,7 @@ metadata:
 data:
   alertmanager.yml: |
     global:
-      smtp_smarthost: 'localhost:587'
+      smtp_smarthost: 'smtp.gmail.com:587'  # Update with your SMTP server
       smtp_from: 'alertmanager@codet.com'
     
     route:
@@ -190,7 +190,7 @@ data:
     receivers:
     - name: 'default'
       webhook_configs:
-      - url: 'http://localhost:5001/webhook'
+      - url: 'http://slack-webhook-service.monitoring.svc.cluster.local:5001/webhook'
         send_resolved: true
     
     - name: 'critical-alerts'
@@ -210,7 +210,7 @@ data:
           Alert: {{ .GroupLabels.alertname }}
           Description: {{ range .Alerts }}{{ .Annotations.description }}{{ end }}
       webhook_configs:
-      - url: 'http://localhost:5001/webhook'
+      - url: 'http://slack-webhook-service.monitoring.svc.cluster.local:5001/webhook'
         send_resolved: true
 
 ---
@@ -241,7 +241,7 @@ spec:
         args:
         - '--config.file=/etc/alertmanager/alertmanager.yml'
         - '--storage.path=/alertmanager'
-        - '--web.external-url=http://localhost:9093'
+        - '--web.external-url=http://alertmanager.monitoring.svc.cluster.local:9093'
       volumes:
       - name: config-volume
         configMap:

@@ -57,7 +57,7 @@ cd terraform && terraform init && terraform apply -auto-approve && cd ..
 
 ## GCP Cloud Shell Deployment
 
-This project is optimized for deployment using GCP Cloud Shell:
+This project is optimized for deployment using GCP Cloud Shell with VPC-native connectivity:
 
 1. **Open Cloud Shell** in the Google Cloud Console
 2. **Clone your repository**:
@@ -75,6 +75,12 @@ This project is optimized for deployment using GCP Cloud Shell:
    ```
 
 All required tools (`kubectl`, `helm`, `gcloud`, `terraform`) are pre-installed in Cloud Shell.
+
+### VPC Connectivity
+Applications will connect through the private VPC network using internal service DNS names:
+- `codet-dev-yb-yb-tserver-service.codet-dev-yb.svc.cluster.local:5433`
+- `codet-staging-yb-yb-tserver-service.codet-staging-yb.svc.cluster.local:5433`  
+- `codet-prod-yb-yb-tserver-service.codet-prod-yb.svc.cluster.local:5433`
 
 ## File Structure
 
