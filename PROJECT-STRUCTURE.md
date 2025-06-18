@@ -40,7 +40,7 @@ This repository implements a comprehensive YugabyteDB multi-environment deployme
 ### 1. Infrastructure Layer (GKE + VPC)
 - **Private GKE Cluster**: Nodes without public IP addresses
 - **Private VPC**: `yugabyte-tf-vpc` with isolated networking
-- **Subnetwork**: `yugabyte-subnet-us-central1` (10.0.1.0/24)
+- **Subnetwork**: `yugabyte-subnet` (10.0.1.0/24)
 - **Cloud NAT**: Enables outbound internet access
 - **Private Google Access**: Access to Google services without public IPs
 
@@ -51,12 +51,12 @@ This repository implements a comprehensive YugabyteDB multi-environment deployme
 - **Services**: Internal load balancing and service discovery
 - **Persistent Volumes**: Durable storage for database data
 
-### 3. Database Layer
-- **Master Nodes**: Cluster metadata and coordination (3 replicas each)
-- **TServer Nodes**: Data storage and query processing (3-5 replicas per env)
-- **Replication Factor**: 3x for fault tolerance
-- **TLS Encryption**: All inter-node communication encrypted
-- **Authentication**: Role-based access control enabled
+### 3. Database Layer (COST OPTIMIZED)
+- **Master Nodes**: Cluster metadata and coordination (1 replica each)
+- **TServer Nodes**: Data storage and query processing (1 replica per env)
+- **Replication Factor**: 1x for cost savings (single point of failure)
+- **TLS Encryption**: DISABLED for cost optimization
+- **Authentication**: DISABLED for cost optimization
 
 ### 4. Security Layer
 - **Network Isolation**: Private VPC with no public endpoints
@@ -69,18 +69,20 @@ This repository implements a comprehensive YugabyteDB multi-environment deployme
 
 | Environment | Purpose | Resources | Scaling Strategy |
 |-------------|---------|-----------|------------------|
-| **Development** | Developer testing, feature development | Moderate resources (2 CPU, 4Gi RAM per node) | Manual scaling for testing |
-| **Staging** | Pre-production testing, integration tests | Production-like resources (3-4 CPU, 6-8Gi RAM) | Auto-scaling enabled |
-| **Production** | Live production workloads | High resources (4-6 CPU, 8-12Gi RAM) | Auto-scaling + monitoring |
+| **Development** | Developer testing, feature development | Minimal resources (0.5-1 CPU, 1-2Gi RAM per node) | Manual scaling for testing |
+| **Staging** | Pre-production testing, integration tests | Minimal resources (0.5-1 CPU, 1-2Gi RAM per node) | Manual scaling for cost |
+| **Production** | Live production workloads | Minimal resources (0.5-1 CPU, 1-2Gi RAM per node) | Manual scaling for cost |
 
 ## 🔐 Security Implementation
 
-### Database-Level Security (RBAC)
-1. **Admin Roles**: Full database administration capabilities
-2. **Application Roles**: Restricted to stored procedure execution only
-3. **No Direct Table Access**: Applications cannot run arbitrary SQL
-4. **Stored Procedures**: All data operations go through secure functions
-5. **Audit Trail**: Complete logging of all database operations
+### Database-Level Security (COST OPTIMIZED)
+⚠️ **NOTE**: Authentication and TLS are DISABLED for cost optimization
+
+1. **Basic Network Security**: VPC isolation and network policies
+2. **Application Roles**: Available but authentication disabled
+3. **No Direct Table Access**: Enforced by application design (not DB auth)
+4. **Stored Procedures**: Available for application use
+5. **Audit Trail**: DISABLED for cost optimization
 
 ### Network Security
 1. **Private Networking**: No public IP addresses on database nodes

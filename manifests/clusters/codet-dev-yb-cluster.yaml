@@ -11,26 +11,26 @@ spec:
   image:
     repository: yugabytedb/yugabyte
     tag: 2.20.2.0-b98  # Use same stable version as production
-  # MINIMAL: Reduced replication for cost savings
-  replicationFactor: 1  # Reduced from 3 for dev environment
+  # MINIMAL: Single replication for development cost savings
+  replicationFactor: 1  # Reduced from 3 for cost
 
   # Domain for the cluster
   domain: cluster.local
 
-  # Master Node Configuration (minimal resources)
+  # Master Node Configuration (minimal dev)
   master:
     replicas: 1  # Reduced from 3 for cost savings
     storage:
-      size: 5Gi  # Reduced from 10Gi
-      storageClass: pd-standard  # Changed from standard-rwo for better consistency
+      size: 10Gi  # Reduced from 20Gi
+      storageClass: pd-standard  # Changed from standard-rwo for cost
     resources:
       requests:
-        cpu: "0.5"      # Consistent with limits
-        memory: 1Gi     # Consistent with limits
+        cpu: "0.5"      # Minimal CPU
+        memory: 1Gi     # Minimal memory
       limits:
-        cpu: "1"        # Increased from 0.5 for headroom
-        memory: 2Gi     # Increased from 1Gi for headroom
-    # Simplified affinity for single replica
+        cpu: "1"        # Low limit
+        memory: 2Gi     # Low limit
+    # Simplified affinity
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
@@ -40,33 +40,33 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-standard-2
               - e2-micro
-    # Enable security even in dev for consistency and testing
-    enableAuth: true   # Changed from false - enable auth for security consistency
+              - e2-small
+    # DISABLED: Authentication and TLS for cost savings
+    enableAuth: false
     tls:
-      enabled: true    # Changed from false - enable TLS for security consistency
+      enabled: false
 
-  # T-Server Node Configuration (minimal resources)
+  # T-Server Node Configuration (minimal dev)
   tserver:
     replicas: 1  # Reduced from 3 for single node setup
     storage:
-      size: 10Gi  # Reduced from 50Gi
-      storageClass: pd-standard  # Changed from standard-rwo for better consistency
+      size: 20Gi  # Reduced from 100Gi
+      storageClass: pd-standard  # Changed for cost optimization
     resources:
       requests:
-        cpu: "0.5"      # Reduced from 2
-        memory: 2Gi     # Reduced from 4Gi
+        cpu: "1"        # Consistent baseline
+        memory: 2Gi     # Reduced memory
       limits:
-        cpu: "1"        # Reduced from 2
-        memory: 2Gi     # Reduced from 4Gi
+        cpu: "1"        # Reduced for cost
+        memory: 2Gi     # Reduced for cost
     # Add tolerations for dedicated tserver nodes
     tolerations:
     - key: "yugabyte.com/tserver"
       operator: "Equal"
       value: "true"
       effect: "NoSchedule"
-    # Simplified affinity for single replica
+    # Simplified affinity
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
@@ -76,8 +76,8 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-standard-2
-              - e2-standard-4
+              - e2-micro
+              - e2-small
         # Prefer tserver nodes if available
         - weight: 80
           preference:
@@ -86,19 +86,23 @@ spec:
               operator: In
               values:
               - yugabyte-tserver
-    # Enable security even in dev for consistency and testing
-    enableAuth: true   # Changed from false - enable auth for security consistency
+    # DISABLED: Authentication and TLS for cost savings
+    enableAuth: false
     tls:
-      enabled: true    # Changed from false - enable TLS for security consistency
+      enabled: false
 
-  # Enable monitoring for visibility into dev environment
+  # DISABLED: monitoring for cost savings
   monitoring:
-    enabled: true      # Changed from false - enable monitoring for dev visibility
+    enabled: false
+
+  # Disable service monitor
+  serviceMonitor:
+    enabled: false
 
   # Minimal resource quotas
   resourceQuota:
     enabled: true
     hard:
-      requests.cpu: "2"      # Very low limits
-      requests.memory: "4Gi"
+      requests.cpu: "3"      # Low limits
+      requests.memory: "4Gi" # Reduced memory quota
       persistentvolumeclaims: "3" 

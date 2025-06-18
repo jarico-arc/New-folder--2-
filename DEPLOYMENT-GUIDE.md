@@ -6,7 +6,7 @@ This guide will walk you through deploying three separate YugabyteDB instances (
 
 According to your existing infrastructure, you have:
 - ✅ Private VPC: `yugabyte-tf-vpc`
-- ✅ Subnetwork: `yugabyte-subnet-us-central1` (us-central1 region)
+- ✅ Subnetwork: `yugabyte-subnet` (us-central1 region)
 - ✅ IP Range: `10.0.1.0/24`
 
 ### GCP Cloud Shell Setup
@@ -141,15 +141,18 @@ kubectl port-forward -n codet-staging-yb svc/codet-staging-yb-yb-master-ui 7001:
 kubectl port-forward -n codet-prod-yb svc/codet-prod-yb-yb-master-ui 7002:7000 &
 ```
 
-## Step 6: Access Monitoring Dashboard
+## Step 6: Monitoring (DISABLED FOR COST OPTIMIZATION)
 
+⚠️ **MONITORING DISABLED**: Grafana and Prometheus are not deployed in this cost-optimized configuration.
+
+**Alternative monitoring options:**
 ```bash
-# Access Grafana
-kubectl port-forward -n monitoring svc/grafana 3000:3000 &
-# Use Cloud Shell Web Preview on port 3000
+# Use YugabyteDB admin UI for basic monitoring
+kubectl port-forward -n codet-dev-yb svc/codet-dev-yb-yb-master-ui 7000:7000 &
 
-# Access Prometheus
-kubectl port-forward -n monitoring svc/prometheus 9090:9090 &
+# Use kubectl for resource monitoring
+kubectl top pods -A | grep yb
+kubectl get ybcluster -A
 ```
 
 ## Scaling Operations
@@ -211,15 +214,15 @@ After deployment, check the `credentials/` directory for:
 - `codet-staging-credentials.txt`
 - `codet-prod-credentials.txt`
 
-## Resource Configuration Summary
+## Resource Configuration Summary (COST OPTIMIZED)
 
 | Environment | Master Nodes | TServer Nodes | Master Storage | TServer Storage | CPU/Node | Memory/Node |
 |-------------|--------------|---------------|----------------|-----------------|----------|-------------|
-| Development | 1            | 1             | 5Gi            | 10Gi            | 0.5-1 CPU | 1-2Gi      |
-| Staging     | 1            | 1             | 10Gi           | 20Gi            | 1-2 CPU   | 2-4Gi      |
-| Production  | 3            | 3             | 50Gi           | 200Gi           | 2-4 CPU   | 4-8Gi      |
+| Development | 1            | 1             | 10Gi           | 20Gi            | 0.5-1 CPU | 1-2Gi      |
+| Staging     | 1            | 1             | 10Gi           | 20Gi            | 0.5-1 CPU | 1-2Gi      |
+| Production  | 1            | 1             | 10Gi           | 20Gi            | 0.5-1 CPU | 1-2Gi      |
 
-**Note**: Dev and Staging use minimal resources for cost optimization. Production uses full replication for high availability.
+**Note**: ALL environments use minimal resources and single replica (replicationFactor: 1) for cost optimization. TLS, authentication, monitoring, and backups are DISABLED to minimize costs.
 
 ## Security Implementation
 

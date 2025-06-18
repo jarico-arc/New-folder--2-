@@ -244,7 +244,7 @@ resource "google_container_cluster" "yugabyte_cluster" {
       ]
 
       disk_size    = 100
-      disk_type    = "pd-ssd"
+      disk_type    = "pd-standard"
       image_type   = "COS_CONTAINERD"
 
       shielded_instance_config {
@@ -296,7 +296,7 @@ resource "google_container_node_pool" "general_purpose" {
     preemptible  = false
     machine_type = var.general_machine_type
     disk_size_gb = 100
-    disk_type    = "pd-ssd"
+    disk_type    = "pd-standard"
     image_type   = "COS_CONTAINERD"
 
     labels = {
@@ -356,7 +356,7 @@ resource "google_container_node_pool" "yugabyte_tserver" {
     preemptible  = false
     machine_type = var.tserver_machine_type
     disk_size_gb = 200
-    disk_type    = "pd-ssd"
+    disk_type    = "pd-standard"
     image_type   = "COS_CONTAINERD"
 
     labels = {

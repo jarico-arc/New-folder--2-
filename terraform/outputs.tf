@@ -168,22 +168,30 @@ output "resource_summary" {
 
 # Cost Estimation Information
 output "estimated_monthly_cost_info" {
-  description = "Information about estimated monthly costs"
+  description = "Information about estimated monthly costs (MINIMAL CONFIGURATION)"
   value = {
-    note = "Estimated costs depend on actual usage and Google Cloud pricing"
+    note = "Estimated costs for MINIMAL COST deployment with e2-micro/e2-small instances"
     components = {
       gke_cluster_management = "Free (GKE cluster management)"
-      general_nodes         = "~$35/month per e2-standard-2 node (if running 24/7)"
-      tserver_nodes        = "~$70/month per e2-standard-4 node (if running 24/7)"
-      network_egress       = "Variable based on traffic"
-      persistent_disks     = "~$0.17/GB/month for SSD disks"
-      load_balancers       = "~$18/month per load balancer"
+      general_nodes         = "~$6/month per e2-micro node (if running 24/7)"
+      tserver_nodes        = "~$12/month per e2-small node (if running 24/7)"
+      network_egress       = "Variable based on traffic (~$1-5/month for minimal usage)"
+      persistent_disks     = "~$0.10/GB/month for standard disks (~$3-5/month total)"
+      load_balancers       = "~$18/month per load balancer (optional)"
     }
+    total_estimated_cost = "~$130-150/month for all environments (dev/staging/prod)"
+    optimization_notes = [
+      "Single replica configuration (replicationFactor: 1)",
+      "Minimal machine types (e2-micro/e2-small)",
+      "Disabled TLS, authentication, monitoring, and backups",
+      "Standard disks instead of SSD",
+      "Minimal resource allocations and quotas"
+    ]
     optimization_tips = [
+      "Stop clusters when not in use to save ~80% of compute costs",
       "Use preemptible nodes for development environments",
-      "Scale down or delete dev/staging clusters when not in use",
-      "Monitor and adjust node pool sizes based on actual workload",
-      "Use committed use discounts for production workloads"
+      "Monitor disk usage to avoid unexpected growth",
+      "Consider committed use discounts for long-term deployments"
     ]
   }
 } 

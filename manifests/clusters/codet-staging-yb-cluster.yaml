@@ -40,12 +40,12 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-standard-2
-              - e2-standard-4
-    # Enable security in staging for production consistency
-    enableAuth: true   # Changed from false - enable auth for security consistency
+              - e2-micro
+              - e2-small
+    # DISABLED: Authentication and TLS for cost savings
+    enableAuth: false
     tls:
-      enabled: true    # Changed from false - enable TLS for security consistency
+      enabled: false
 
   # T-Server Node Configuration (minimal staging)
   tserver:
@@ -56,10 +56,10 @@ spec:
     resources:
       requests:
         cpu: "1"        # Consistent baseline
-        memory: 2Gi     # Consistent baseline
+        memory: 2Gi     # Reduced memory allocation
       limits:
-        cpu: "2"        # Increased from 1 for proper headroom
-        memory: 4Gi     # Increased from 3Gi for proper headroom
+        cpu: "1"        # Reduced for cost optimization
+        memory: 2Gi     # Reduced for cost optimization
     # Add tolerations for dedicated tserver nodes
     tolerations:
     - key: "yugabyte.com/tserver"
@@ -76,7 +76,8 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-standard-2
+              - e2-micro
+              - e2-small
         # Prefer tserver nodes if available
         - weight: 80
           preference:
@@ -85,19 +86,23 @@ spec:
               operator: In
               values:
               - yugabyte-tserver
-    # Enable security in staging for production consistency
-    enableAuth: true   # Changed from false - enable auth for security consistency
+    # DISABLED: Authentication and TLS for cost savings
+    enableAuth: false
     tls:
-      enabled: true    # Changed from false - enable TLS for security consistency
+      enabled: false
 
-  # Enable monitoring for staging visibility
+  # DISABLED: monitoring for cost savings
   monitoring:
-    enabled: true      # Changed from false - enable monitoring for staging visibility
+    enabled: false
+
+  # Disable service monitor
+  serviceMonitor:
+    enabled: false
 
   # Minimal resource quotas
   resourceQuota:
     enabled: true
     hard:
-      requests.cpu: "3"      # Low limits
-      requests.memory: "6Gi"
+      requests.cpu: "3"      # Reduced limits
+      requests.memory: "4Gi" # Reduced memory
       persistentvolumeclaims: "3" 

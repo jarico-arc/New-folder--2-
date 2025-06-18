@@ -84,9 +84,13 @@ variable "max_memory" {
 
 # General Purpose Node Pool Configuration
 variable "general_machine_type" {
-  description = "Machine type for general purpose nodes"
+  description = "Machine type for general purpose node pool"
   type        = string
-  default     = "e2-standard-2"
+  default     = "e2-micro"
+  validation {
+    condition = can(regex("^(e2-micro|e2-small|e2-medium|e2-standard-[2-8]|n2-standard-[2-8]|n2-highmem-[2-8])$", var.general_machine_type))
+    error_message = "Machine type must be a valid GCE machine type."
+  }
 }
 
 variable "general_min_nodes" {
@@ -103,9 +107,13 @@ variable "general_max_nodes" {
 
 # YugabyteDB TServer Node Pool Configuration
 variable "tserver_machine_type" {
-  description = "Machine type for YugabyteDB TServer nodes"
+  description = "Machine type for YugabyteDB TServer node pool"
   type        = string
-  default     = "e2-standard-4"
+  default     = "e2-small"
+  validation {
+    condition = can(regex("^(e2-micro|e2-small|e2-medium|e2-standard-[2-8]|n2-standard-[2-8]|n2-highmem-[2-8])$", var.tserver_machine_type))
+    error_message = "Machine type must be a valid GCE machine type."
+  }
 }
 
 variable "tserver_min_nodes" {

@@ -1,11 +1,12 @@
 # YugabyteDB Infrastructure - PRODUCTION-READY Configuration
-# Project: codet-dev-d5157 - Optimized for production reliability with cost consciousness
+# Project: codet-dev-d5157 - Optimized for MINIMAL COST
+# Region: us-central1
 
 project_id = "codet-dev-d5157"
 region     = "us-central1"
 
 vpc_name    = "yugabyte-tf-vpc"
-subnet_name = "yugabyte-subnet-us-central1"
+subnet_name = "yugabyte-subnet"
 subnet_cidr = "10.0.1.0/24"
 
 pods_cidr     = "10.1.0.0/16"
@@ -14,20 +15,21 @@ master_cidr   = "172.16.0.0/28"
 
 cluster_name = "codet-yugabyte-cluster"
 
-# PRODUCTION-READY RESOURCE SETTINGS
-min_cpu    = 4    # Increased for production workloads
-max_cpu    = 40   # Increased to support 3x3 production setup
-min_memory = 16   # Increased for production workloads  
-max_memory = 80   # Increased to support production setup
+# Node Pool Configuration - MINIMAL COST
+general_min_nodes = 1
+general_max_nodes = 2
+general_machine_type = "e2-micro"    # Minimal cost
 
-# Use production-appropriate machine types
-general_machine_type = "e2-standard-2"    # Upgraded for stability
-general_min_nodes   = 1
-general_max_nodes   = 6                   # Increased for production scaling
+# TServer Node Pool - MINIMAL COST  
+tserver_min_nodes = 1
+tserver_max_nodes = 2
+tserver_machine_type = "e2-small"    # Minimal cost with some memory
 
-tserver_machine_type = "e2-standard-4"    # Upgraded for production performance
-tserver_min_nodes   = 0
-tserver_max_nodes   = 6                   # Increased for production scaling
+# Resource Limits - MINIMAL
+min_cpu    = 1     # Minimal CPU
+max_cpu    = 4     # Low maximum
+min_memory = 2     # Minimal memory  
+max_memory = 8     # Low maximum
 
 environment = "prod"  # Production environment
 
@@ -41,11 +43,11 @@ labels = {
 }
 
 # PRODUCTION SETTINGS - Enable for reliability
-backup_enabled        = true             # Enable backups for production
+backup_enabled        = false            # Disabled for cost savings
 backup_retention_days = 30               # Extended retention
 
-monitoring_enabled = true                # Enable monitoring for production
-logging_enabled    = true                # Enable logging for production
+monitoring_enabled    = false            # Disabled for cost savings
+logging_enabled       = false            # Disabled for cost savings
 
 enable_binary_authorization = true       # Enable for security
 enable_network_policy      = true        # Enable for security  
@@ -53,6 +55,6 @@ enable_private_nodes       = true        # Keep for security
 enable_workload_identity   = true        # Enable for security
 
 # MAINTENANCE CONFIGURATION - Dynamic scheduling
-maintenance_start_hour      = 2           # 2 AM maintenance window
-maintenance_duration_hours  = 4           # 4-hour maintenance window
+maintenance_start_hour    = 3
+maintenance_duration_hours = 4
 maintenance_recurrence     = "FREQ=WEEKLY;BYDAY=SA"  # Every Saturday 

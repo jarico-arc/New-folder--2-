@@ -53,8 +53,8 @@ This document summarizes the comprehensive improvements made to the YugabyteDB d
 ├── Cloud NAT Gateway
 ├── Firewall rules (internal + IAP SSH)
 ├── GKE Cluster (private nodes)
-├── General Purpose Node Pool (e2-standard-2)
-└── YugabyteDB TServer Node Pool (e2-standard-4)
+├── General Purpose Node Pool (e2-micro) [COST OPTIMIZED]
+└── YugabyteDB TServer Node Pool (e2-small) [COST OPTIMIZED]
 ```
 
 ## 🔄 High Availability & Resilience
@@ -73,10 +73,12 @@ This document summarizes the comprehensive improvements made to the YugabyteDB d
   - Prevents single points of failure
   - Production uses strict anti-affinity
 
-### 3. Progressive Resource Allocation
-- **Development**: 2 CPU, 4Gi RAM, 50Gi storage
-- **Staging**: 3-4 CPU, 6-8Gi RAM, 100Gi storage  
-- **Production**: 4-6 CPU, 8-12Gi RAM, 500Gi storage
+### 3. Minimal Resource Allocation (COST OPTIMIZED)
+- **Development**: 1 CPU, 2Gi RAM, 20Gi storage (e2-micro/e2-small)
+- **Staging**: 1 CPU, 2Gi RAM, 20Gi storage (e2-micro/e2-small)
+- **Production**: 1 CPU, 2Gi RAM, 20Gi storage (e2-micro/e2-small)
+- **Replication**: Single replica (replicationFactor: 1) across all environments
+- **Features Disabled**: TLS, authentication, monitoring, backups for cost savings
 
 ## 📊 Monitoring & Observability
 
@@ -226,17 +228,24 @@ Production    → Maximum reliability, performance
 | Monitoring | Manual | Automated | 📊 Real-time insights |
 | Deployment | Manual | CI/CD | 🚀 10x faster |
 | Scalability | Fixed | Auto-scaling | 📈 Elastic capacity |
-| Costs | Fixed | Optimized | 💰 30-50% savings |
+| Costs | $2000/month | Minimal ($130/month) | 💰 93% savings |
 
 ## 🎉 Results
 
-The enhanced YugabyteDB deployment now provides:
+The cost-optimized YugabyteDB deployment now provides:
 
-- **Enterprise Security**: Military-grade encryption and access controls
-- **High Availability**: 99.9%+ uptime with automatic failover  
-- **Operational Excellence**: Complete observability and automation
+- **Minimal Cost**: ~$130/month total (93% cost reduction from $2000/month)
+- **Single Replica Setup**: Cost-optimized but reduced availability 
+- **Basic Security**: Network policies and RBAC (TLS/auth disabled for cost)
+- **Standard Storage**: pd-standard disks instead of expensive SSD
 - **Developer Productivity**: Self-service environments and CI/CD
-- **Cost Optimization**: Dynamic scaling and resource management
-- **Compliance Ready**: Audit trails and security controls
+- **Micro/Small Instances**: e2-micro and e2-small for minimal compute cost
 
-This transformation represents a comprehensive evolution from a basic database deployment to a production-ready, enterprise-grade data platform that can support mission-critical applications at scale. 
+**⚠️ COST OPTIMIZATION TRADEOFFS:**
+- Single point of failure (replicationFactor: 1)
+- No encryption in transit/at rest (TLS disabled)
+- No authentication (auth disabled)
+- No monitoring/alerting (disabled)
+- No automated backups (disabled)
+- Reduced performance with minimal resources
+This transformation represents an aggressive cost optimization that prioritizes minimal expenses over enterprise features, suitable for development, testing, or budget-constrained environments. 

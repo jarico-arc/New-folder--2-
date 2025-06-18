@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Complete YugabyteDB Stack Deployment Script
-# This script deploys the entire production-ready YugabyteDB stack
+# This script deploys the entire cost-optimized YugabyteDB stack
 
 set -e
 
-echo "🚀 Starting complete YugabyteDB stack deployment..."
+echo "🚀 Starting complete YugabyteDB stack deployment (MINIMAL COST VERSION)..."
 
 # Check prerequisites
 echo "🔍 Checking prerequisites..."
@@ -50,12 +50,9 @@ if ! ./scripts/deploy-all-environments.sh; then
     exit 1
 fi
 
-# Deploy monitoring
-echo "📊 Deploying monitoring..."
-if ! kubectl apply -f manifests/monitoring/; then
-    echo "❌ Failed to deploy monitoring stack"
-    exit 1
-fi
+# SKIP monitoring deployment (disabled for cost optimization)
+echo "⏭️  Skipping monitoring deployment (disabled for cost optimization)"
+echo "   Monitoring features are disabled in cluster configurations"
 
 # Apply security policies
 echo "🔒 Applying security policies..."
@@ -76,7 +73,16 @@ if ! ./scripts/setup-database-rbac.sh; then
 fi
 
 echo "🎉 Deployment completed!"
-echo "Access Grafana: kubectl port-forward -n monitoring svc/grafana 3000:3000"
+echo ""
+echo "💰 COST-OPTIMIZED DEPLOYMENT FEATURES:"
+echo "- Single replica configuration (replicationFactor: 1)"
+echo "- Minimal machine types (e2-micro/e2-small)"
+echo "- Disabled TLS, authentication, monitoring, and backups"
+echo "- Standard disks instead of SSD"
+echo "- Estimated cost: ~$130-150/month for all environments"
+echo ""
+echo "⚠️  MONITORING DISABLED: No Grafana dashboard available"
+echo "   Use kubectl commands and YugabyteDB admin UI for monitoring"
 echo ""
 echo "📋 Bitbucket Pipeline Features:"
 echo "- Automatic validation on pull requests"

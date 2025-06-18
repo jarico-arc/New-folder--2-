@@ -1,5 +1,5 @@
 # Pod Disruption Budgets for YugabyteDB
-# Ensures high availability during voluntary disruptions like rolling updates
+# Minimal configuration for single replica setup (cost optimized)
 
 ---
 # Development Environment - Minimal disruption budget (single replica)
@@ -52,14 +52,14 @@ spec:
       app: yb-tserver
 
 ---
-# Production Environment - High availability disruption budgets
+# Production Environment - Minimal disruption budget (single replica for cost)
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: codet-prod-yb-master-pdb
   namespace: codet-prod-yb
 spec:
-  minAvailable: 2  # Keep at least 2 out of 3 masters available for quorum
+  minAvailable: 1  # Keep at least 1 master available (we only have 1)
   selector:
     matchLabels:
       app: yb-master
@@ -71,32 +71,9 @@ metadata:
   name: codet-prod-yb-tserver-pdb
   namespace: codet-prod-yb
 spec:
-  minAvailable: 2  # Keep at least 2 out of 3 tservers available for replication
+  minAvailable: 1  # Keep at least 1 tserver available (we only have 1)
   selector:
     matchLabels:
       app: yb-tserver
 
----
-# Monitoring PDB to prevent monitoring downtime
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: prometheus-pdb
-  namespace: monitoring
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: prometheus
-
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: grafana-pdb
-  namespace: monitoring
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: grafana 
+# NOTE: Monitoring PDBs removed - monitoring is disabled for cost optimization 

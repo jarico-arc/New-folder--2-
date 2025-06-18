@@ -6,41 +6,32 @@ metadata:
   labels:
     environment: production
     app: yugabytedb
-    cost: optimized
+    cost: minimal
 spec:
   image:
     repository: yugabytedb/yugabyte
     tag: 2.20.2.0-b98
-  # PRODUCTION: Enable proper replication for high availability
-  replicationFactor: 3
+  # MINIMAL: Single replication for cost savings
+  replicationFactor: 1
 
   # Domain for the cluster
   domain: cluster.local
 
-  # Master Node Configuration (production-ready)
+  # Master Node Configuration (minimal cost)
   master:
-    replicas: 3
+    replicas: 1
     storage:
-      size: 50Gi
-      storageClass: pd-ssd
+      size: 10Gi
+      storageClass: pd-standard
     resources:
       requests:
-        cpu: "2"
-        memory: 4Gi
+        cpu: "0.5"
+        memory: 1Gi
       limits:
-        cpu: "2"
-        memory: 4Gi
-    # Production anti-affinity for HA
+        cpu: "1"
+        memory: 2Gi
+    # Simplified affinity
     affinity:
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-            - key: app
-              operator: In
-              values:
-              - yb-master
-          topologyKey: kubernetes.io/hostname
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
         - weight: 100
@@ -49,47 +40,34 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-standard-2
-              - e2-standard-4
-    # PRODUCTION SECURITY: Enable full security
-    enableAuth: true
+              - e2-micro
+              - e2-small
+    # DISABLED: Authentication and TLS for cost savings
+    enableAuth: false
     tls:
-      enabled: true
-    # Production annotations for monitoring
-    podAnnotations:
-      prometheus.io/scrape: "true"
-      prometheus.io/port: "7000"
+      enabled: false
 
-  # T-Server Node Configuration (production-ready)
+  # T-Server Node Configuration (minimal cost)
   tserver:
-    replicas: 3
+    replicas: 1
     storage:
-      size: 200Gi
-      storageClass: pd-ssd
+      size: 20Gi
+      storageClass: pd-standard
     resources:
       requests:
-        cpu: "2"
-        memory: 8Gi
+        cpu: "1"
+        memory: 2Gi
       limits:
-        cpu: "4"
-        memory: 8Gi
+        cpu: "1"
+        memory: 2Gi
     # Add tolerations for dedicated tserver nodes
     tolerations:
     - key: "yugabyte.com/tserver"
       operator: "Equal"
       value: "true"
       effect: "NoSchedule"
-    # Production anti-affinity for HA
+    # Simplified affinity
     affinity:
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-            - key: app
-              operator: In
-              values:
-              - yb-tserver
-          topologyKey: kubernetes.io/hostname
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
         - weight: 100
@@ -98,8 +76,8 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - e2-standard-2
-              - e2-standard-4
+              - e2-micro
+              - e2-small
         # Prefer tserver nodes if available
         - weight: 80
           preference:
@@ -108,50 +86,44 @@ spec:
               operator: In
               values:
               - yugabyte-tserver
-    # PRODUCTION SECURITY: Enable full security
-    enableAuth: true
+    # DISABLED: Authentication and TLS for cost savings
+    enableAuth: false
     tls:
-      enabled: true
-    # Production annotations for monitoring
-    podAnnotations:
-      prometheus.io/scrape: "true"
-      prometheus.io/port: "9000"
+      enabled: false
 
-  # ENABLE monitoring for production
+  # DISABLED: monitoring for cost savings
   monitoring:
-    enabled: true
+    enabled: false
 
-  # Enable service monitor for Prometheus
+  # Disable service monitor
   serviceMonitor:
-    enabled: true
+    enabled: false
 
-  # Production resource quotas
+  # Minimal resource quotas
   resourceQuota:
     enabled: true
     hard:
-      requests.cpu: "15"
-      requests.memory: "36Gi"
-      persistentvolumeclaims: "10"
+      requests.cpu: "3"
+      requests.memory: "4Gi"
+      persistentvolumeclaims: "3"
   
-  # Production-specific configurations
+  # Minimal configurations
   gflags:
     master:
-      # Production performance optimizations
-      tablet_split_size_threshold_bytes: "10737418240"
-      tablet_split_low_phase_size_threshold_bytes: "5368709120"
-      # Security settings
-      use_client_to_server_encryption: "true"
-      use_node_to_node_encryption: "true"
+      # Minimal performance settings
+      tablet_split_size_threshold_bytes: "1073741824"
+      tablet_split_low_phase_size_threshold_bytes: "536870912"
+      # Disabled security for cost
+      use_client_to_server_encryption: "false"
+      use_node_to_node_encryption: "false"
     tserver:
-      # Production performance optimizations  
-      memstore_size_mb: "1024"
-      global_memstore_size_mb_max: "2048"
-      # Security settings
-      use_client_to_server_encryption: "true"
-      use_node_to_node_encryption: "true"
+      # Minimal performance settings  
+      memstore_size_mb: "256"
+      global_memstore_size_mb_max: "512"
+      # Disabled security for cost
+      use_client_to_server_encryption: "false"
+      use_node_to_node_encryption: "false"
 
-  # Backup configuration for production
+  # DISABLED: Backup for cost savings
   backup:
-    enabled: true
-    schedule: "0 2 * * *"
-    retention: "7d" 
+    enabled: false 
