@@ -237,7 +237,6 @@ resource "google_container_cluster" "yugabyte_cluster" {
       disk_size    = 100
       disk_type    = "pd-ssd"
       image_type   = "COS_CONTAINERD"
-      machine_type = "e2-standard-4"
 
       shielded_instance_config {
         enable_secure_boot          = true
@@ -357,7 +356,7 @@ resource "google_container_node_pool" "yugabyte_tserver" {
       workload    = "database"
     }
 
-    taints {
+    taint {
       key    = "yugabyte.com/tserver"
       value  = "true"
       effect = "NO_SCHEDULE"

@@ -6,96 +6,84 @@ metadata:
   labels:
     environment: staging
     app: yugabytedb
+    cost: minimal
 spec:
   image:
     repository: yugabytedb/yugabyte
     tag: latest
-  # Replication factor for data redundancy
-  replicationFactor: 3
+  # MINIMAL: Single replication for staging cost savings
+  replicationFactor: 1  # Reduced from 3 for cost
 
   # Domain for the cluster
   domain: cluster.local
 
-  # Master Node Configuration (the brains of the DB)
+  # Master Node Configuration (minimal staging)
   master:
-    replicas: 3 # Recommended for production-like environments for fault tolerance
+    replicas: 1  # Reduced from 3 for cost savings
     storage:
-      size: 20Gi # More storage for staging
-      storageClass: standard-rwo # GKE standard persistent disk
-    resources:
-      requests:
-        cpu: "1.5"
-        memory: 3Gi
-      limits:
-        cpu: "2"
-        memory: 4Gi
-    # Anti-affinity to spread masters across nodes
-    affinity:
-      podAntiAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - yb-master
-            topologyKey: kubernetes.io/hostname
-        - weight: 50
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - yb-master
-            topologyKey: topology.kubernetes.io/zone
-    # Enable authentication and TLS
-    enableAuth: true
-    tls:
-      enabled: true
-
-  # T-Server Node Configuration (handles the actual data)
-  tserver:
-    replicas: 3 # Start with 3 nodes
-    storage:
-      size: 100Gi # More storage for staging workloads
+      size: 10Gi  # Reduced from 20Gi
       storageClass: standard-rwo
     resources:
       requests:
-        cpu: "3"
-        memory: 6Gi
+        cpu: "0.5"      # Reduced significantly
+        memory: 1Gi     # Reduced from 3Gi
       limits:
-        cpu: "4"
-        memory: 8Gi
-    # Anti-affinity to spread tservers across nodes
+        cpu: "1"        # Reduced from 2
+        memory: 2Gi     # Reduced from 4Gi
+    # Simplified affinity
     affinity:
-      podAntiAffinity:
+      nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
         - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - yb-tserver
-            topologyKey: kubernetes.io/hostname
-        - weight: 50
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - yb-tserver
-            topologyKey: topology.kubernetes.io/zone
-    # Enable authentication and TLS
-    enableAuth: true
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+              - e2-small
+              - e2-standard-2
+    # Disable expensive features for cost savings
+    enableAuth: false  # Disabled for minimal cost
     tls:
-      enabled: true
+      enabled: false   # Disabled for minimal cost
 
-  # Enable monitoring
+  # T-Server Node Configuration (minimal staging)
+  tserver:
+    replicas: 1  # Reduced from 3 for single node setup
+    storage:
+      size: 20Gi  # Reduced from 100Gi
+      storageClass: standard-rwo
+    resources:
+      requests:
+        cpu: "1"        # Reduced from 3-4
+        memory: 2Gi     # Reduced from 6-8Gi
+      limits:
+        cpu: "1"        # Reduced from 4
+        memory: 3Gi     # Reduced from 8Gi
+    # Simplified affinity
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+              - e2-standard-2
+    # Disable expensive features for cost savings
+    enableAuth: false  # Disabled for minimal cost
+    tls:
+      enabled: false   # Disabled for minimal cost
+
+  # Disable monitoring for cost savings
   monitoring:
-    enabled: true 
+    enabled: false  # Disabled for cost savings
+
+  # Minimal resource quotas
+  resourceQuota:
+    enabled: true
+    hard:
+      requests.cpu: "3"      # Low limits
+      requests.memory: "6Gi"
+      persistentvolumeclaims: "3" 

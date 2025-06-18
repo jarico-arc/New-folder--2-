@@ -6,112 +6,91 @@ metadata:
   labels:
     environment: production
     app: yugabytedb
+    cost: minimal
 spec:
   image:
     repository: yugabytedb/yugabyte
     tag: latest
-  # Replication factor for data redundancy
-  replicationFactor: 3
+  # Minimal replication even for production (cost over reliability)
+  replicationFactor: 1  # Reduced from 3 for extreme cost savings
 
   # Domain for the cluster
   domain: cluster.local
 
-  # Master Node Configuration (the brains of the DB)
+  # Master Node Configuration (minimal production)
   master:
-    replicas: 3 # Recommended for production environments for fault tolerance
+    replicas: 1  # Reduced from 3 for cost savings
     storage:
-      size: 50Gi # Production-grade storage for master
-      storageClass: ssd-retain # Use SSD for better performance and retention policy
+      size: 20Gi  # Reduced from 50Gi
+      storageClass: standard-rwo  # Use standard instead of SSD
     resources:
       requests:
-        cpu: "2"
-        memory: 4Gi
+        cpu: "1"        # Reduced from 2-3
+        memory: 2Gi     # Reduced from 4-6Gi
       limits:
-        cpu: "3"
-        memory: 6Gi
-    # Anti-affinity to spread masters across nodes and zones (strict for production)
+        cpu: "1"        # Reduced from 3
+        memory: 2Gi     # Reduced from 6Gi
+    # Simplified affinity
     affinity:
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-            - key: app
-              operator: In
-              values:
-              - yb-master
-          topologyKey: kubernetes.io/hostname
+      nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
         - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - yb-master
-            topologyKey: topology.kubernetes.io/zone
-    # Enable authentication and TLS
-    enableAuth: true
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+              - e2-standard-2
+    # Keep some security but disable TLS for cost
+    enableAuth: true   # Keep auth for production
     tls:
-      enabled: true
-    # Production-specific configurations
-    podAnnotations:
-      cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+      enabled: false   # Disabled for cost savings
+    # Remove expensive annotations
+    podAnnotations: {}
 
-  # T-Server Node Configuration (handles the actual data)
+  # T-Server Node Configuration (minimal production)
   tserver:
-    replicas: 5 # Start with 5 nodes for production
+    replicas: 1  # Reduced from 5 for extreme cost savings
     storage:
-      size: 500Gi # Large storage for production workloads
-      storageClass: ssd-retain # Use SSD for better performance
+      size: 50Gi  # Reduced from 500Gi
+      storageClass: standard-rwo  # Use standard instead of SSD
     resources:
       requests:
-        cpu: "4"
-        memory: 8Gi
+        cpu: "1"        # Reduced from 4-6
+        memory: 4Gi     # Reduced from 8-12Gi
       limits:
-        cpu: "6"
-        memory: 12Gi
-    # Anti-affinity to spread tservers across nodes and zones (strict for production)
+        cpu: "2"        # Reduced from 6
+        memory: 4Gi     # Reduced from 12Gi
+    # Simplified affinity
     affinity:
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-            - key: app
-              operator: In
-              values:
-              - yb-tserver
-          topologyKey: kubernetes.io/hostname
+      nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
         - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values:
-                - yb-tserver
-            topologyKey: topology.kubernetes.io/zone
-    # Enable authentication and TLS
-    enableAuth: true
+          preference:
+            matchExpressions:
+            - key: node.kubernetes.io/instance-type
+              operator: In
+              values:
+              - e2-standard-2
+    # Keep some security but disable TLS for cost
+    enableAuth: true   # Keep auth for production
     tls:
-      enabled: true
-    # Production-specific configurations
-    podAnnotations:
-      cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+      enabled: false   # Disabled for cost savings
+    # Remove expensive annotations
+    podAnnotations: {}
 
-  # Enable monitoring
+  # Disable monitoring for cost savings
   monitoring:
-    enabled: true
+    enabled: false  # Disabled for cost savings
 
-  # Production-specific settings
+  # Remove service monitor
   serviceMonitor:
-    enabled: true
-  
-  # Resource quotas and limits
+    enabled: false
+
+  # Minimal resource quotas
   resourceQuota:
     enabled: true
     hard:
-      requests.cpu: "30"
-      requests.memory: "60Gi"
-      persistentvolumeclaims: "10" 
+      requests.cpu: "4"       # Much lower than original 30
+      requests.memory: "8Gi"  # Much lower than original 60Gi
+      persistentvolumeclaims: "3"  # Reduced from 10 

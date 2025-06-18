@@ -1,6 +1,6 @@
 # YugabyteDB Multi-Environment Deployment Guide
 
-This guide will walk you through deploying three separate YugabyteDB instances (dev, staging, prod) on your GKE cluster within the existing private VPC infrastructure.
+This guide will walk you through deploying three separate YugabyteDB instances (dev, staging, prod) on your GKE cluster using GCP Cloud Shell and the YugabyteDB Operator.
 
 ## Prerequisites Verification
 
@@ -9,54 +9,75 @@ According to your existing infrastructure, you have:
 - ✅ Subnetwork: `yugabyte-subnet-us-central1` (us-central1 region)
 - ✅ IP Range: `10.0.1.0/24`
 
-### Required Tools
-Ensure you have these tools installed:
+### GCP Cloud Shell Setup
+Open Google Cloud Shell in your browser - all required tools are pre-installed:
 - `kubectl` - Kubernetes command-line tool
 - `helm` - Kubernetes package manager
 - `psql` - PostgreSQL client (for database operations)
 - `gcloud` - Google Cloud CLI
+- `terraform` - Infrastructure as code
 
-## Step 1: Verify GKE Cluster Access
+## Step 1: Connect to Your GKE Cluster
 
 ```bash
-# Check cluster connection
+# Connect to your GKE cluster
+gcloud container clusters get-credentials <your-cluster-name> --zone <your-zone> --project <your-project-id>
+
+# Verify cluster connection
 kubectl cluster-info
 
 # Verify nodes are private (should show private IPs)
 kubectl get nodes -o wide
 ```
 
-## Step 2: Install YugabyteDB Operator
+## Step 2: Clone and Prepare Repository
 
 ```bash
-# Windows PowerShell
-./scripts/install-operator.sh
+# Clone your repository
+git clone <your-repo-url>
+cd <your-repo-name>
 
-# Linux/macOS
+# Make scripts executable
 chmod +x scripts/*.sh
-./scripts/install-operator.sh
 ```
 
-**Expected Output:**
-- Operator namespace created
-- Helm repository added
-- YugabyteDB operator deployed
-- Pods running in `yb-operator` namespace
+## Deployment Options
 
-## Step 3: Deploy All Environments
+### Option 1: Complete Automated Deployment (Recommended)
+
+Deploy everything with one command:
 
 ```bash
-./scripts/deploy-all-environments.sh
+./scripts/deploy-complete-stack.sh
 ```
 
-**This will:**
-- Create namespaces: `codet-dev-yb`, `codet-staging-yb`, `codet-prod-yb`
-- Deploy YugabyteDB clusters in each namespace
-- Wait for clusters to be ready
+This will:
+- Deploy infrastructure (if not using --skip-terraform)
+- Install YugabyteDB operator
+- Generate secure credentials
+- Deploy all three environments
+- Set up monitoring stack
+- Apply security policies
+- Configure database RBAC
 
-**Expected Timeline:** 10-15 minutes for all clusters to be fully operational
+**Expected Timeline:** 15-20 minutes for complete deployment
 
-## Step 4: Monitor Deployment Progress
+### Option 2: Step-by-Step Deployment
+
+For more control over the process:
+
+```bash
+# Step 1: Install YugabyteDB Operator
+./scripts/install-operator.sh
+
+# Step 2: Deploy All Environments
+./scripts/deploy-all-environments.sh
+
+# Step 3: Configure Database Security (RBAC)
+./scripts/setup-database-rbac.sh
+```
+
+## Step 3: Monitor Deployment Progress
 
 ```bash
 # Watch all pods across environments
@@ -67,57 +88,62 @@ kubectl get pods -n codet-dev-yb -w
 
 # Check cluster status
 kubectl get ybcluster -A
+
+# Check YugabyteDB operator status
+kubectl get pods -n yb-operator
 ```
 
-## Step 5: Configure Database Security (RBAC)
+## Step 4: Verify Deployment
 
+### Check Cluster Health
 ```bash
-./scripts/setup-database-rbac.sh
+# Verify all clusters are running
+kubectl get ybcluster -A
+
+# Check pod status
+kubectl get pods -A | grep yb | grep Running
 ```
 
-**This will:**
-- Create admin and application roles for each environment
-- Set up example tables and stored procedures
-- Configure strict permissions (no direct table access)
-- Generate credential files in `credentials/` directory
-
-## Step 6: Verify Security Implementation
-
-Connect to each environment and test the security:
-
+### Test Database Connectivity
 ```bash
 # Port forward to development environment
-kubectl port-forward -n codet-dev-yb svc/codet-dev-yb-yb-tserver-service 5433:5433
+kubectl port-forward -n codet-dev-yb svc/codet-dev-yb-yb-tserver-service 5433:5433 &
 
-# In another terminal, test with application credentials
-psql -h localhost -p 5433 -U codet_dev_app -d codet_dev
+# Test connection (in another terminal)
+psql -h localhost -p 5433 -U yugabyte -d yugabyte -c "SELECT version();"
 ```
 
-**Security Tests:**
-```sql
--- This should WORK (function call)
-SELECT app_schema.create_user('testuser', 'test@example.com');
-
--- This should FAIL (direct table access)
-SELECT * FROM app_schema.users;
-```
-
-## Step 7: Access Database UIs
+## Step 5: Access Database UIs
 
 Each environment has a web-based admin interface:
 
 ```bash
-# Development
-kubectl port-forward -n codet-dev-yb svc/codet-dev-yb-yb-master-ui 7000:7000
+# Development UI
+kubectl port-forward -n codet-dev-yb svc/codet-dev-yb-yb-master-ui 7000:7000 &
 # Open: http://localhost:7000
 
-# Staging
-kubectl port-forward -n codet-staging-yb svc/codet-staging-yb-yb-master-ui 7001:7000
-# Open: http://localhost:7001
+# Use Cloud Shell Web Preview for easy access
+# Click "Web Preview" button in Cloud Shell, then "Preview on port 7000"
+```
 
-# Production
-kubectl port-forward -n codet-prod-yb svc/codet-prod-yb-yb-master-ui 7002:7000
-# Open: http://localhost:7002
+For staging and production:
+```bash
+# Staging UI
+kubectl port-forward -n codet-staging-yb svc/codet-staging-yb-yb-master-ui 7001:7000 &
+
+# Production UI  
+kubectl port-forward -n codet-prod-yb svc/codet-prod-yb-yb-master-ui 7002:7000 &
+```
+
+## Step 6: Access Monitoring Dashboard
+
+```bash
+# Access Grafana
+kubectl port-forward -n monitoring svc/grafana 3000:3000 &
+# Use Cloud Shell Web Preview on port 3000
+
+# Access Prometheus
+kubectl port-forward -n monitoring svc/prometheus-server 9090:9090 &
 ```
 
 ## Scaling Operations
@@ -162,7 +188,7 @@ port: 5433
 
 ### Credentials
 
-Check the `credentials/` directory for:
+After deployment, check the `credentials/` directory for:
 - `codet-dev-credentials.txt`
 - `codet-staging-credentials.txt`
 - `codet-prod-credentials.txt`
@@ -223,22 +249,48 @@ YugabyteDB provides built-in backup capabilities:
 Common issues and solutions:
 
 1. **Pods stuck in Pending**: Check node resources and autoscaler
+   ```bash
+   kubectl describe pod <pod-name> -n <namespace>
+   kubectl get nodes -o wide
+   ```
+
 2. **Connection refused**: Verify port-forward and service endpoints
+   ```bash
+   kubectl get svc -A | grep yb
+   kubectl get endpoints -A | grep yb
+   ```
+
 3. **Permission denied**: Ensure using correct application credentials
+   ```bash
+   # Check if credentials file exists
+   ls -la credentials/
+   ```
+
 4. **Slow performance**: Check CPU/memory limits and consider scaling
+   ```bash
+   kubectl top pods -A | grep yb
+   kubectl describe node <node-name>
+   ```
 
 ## Next Steps
 
-1. **Configure Application**: Update your application connection strings
-2. **Set up Monitoring**: Configure Prometheus/Grafana for metrics
-3. **Backup Strategy**: Implement regular backup procedures
-4. **CI/CD Integration**: Add database deployments to your pipelines
-5. **Security Hardening**: Review and customize RBAC procedures
+1. **Configure CI/CD**: Use the included `bitbucket-pipelines.yml` for automated deployments
+2. **Set up alerts**: Configure monitoring alerts for production environments
+3. **Backup strategy**: Implement regular backup schedules
+4. **Performance tuning**: Adjust resource limits based on workload requirements
 
-## Support and Documentation
+## Clean Up
 
-- [YugabyteDB Documentation](https://docs.yugabyte.com/)
-- [Kubernetes Operator Guide](https://docs.yugabyte.com/latest/deploy/kubernetes/)
-- [RBAC Configuration](https://docs.yugabyte.com/latest/secure/authorization/)
+To remove all resources:
 
-For issues specific to this deployment, check the generated credential files and ensure all prerequisites are met. 
+```bash
+# Delete all YugabyteDB clusters
+kubectl delete ybcluster --all --all-namespaces
+
+# Delete namespaces
+kubectl delete ns codet-dev-yb codet-staging-yb codet-prod-yb
+
+# Delete operator
+helm uninstall yugabyte-operator -n yb-operator
+kubectl delete ns yb-operator
+``` 

@@ -22,22 +22,59 @@ This repository contains all the necessary configuration files and scripts to de
 3. **Cloud NAT** configured for outbound connectivity
 4. **Cluster Autoscaler** enabled for automatic scaling
 
-## Quick Start
+## Deployment Options
 
-### 1. Set up the YugabyteDB Operator
+### Option 1: Complete Stack Deployment (Recommended)
+Deploy everything in one command - includes infrastructure, operator, environments, and security:
+
 ```bash
+# Complete automated deployment
+./scripts/deploy-complete-stack.sh
+```
+
+### Option 2: Step-by-Step Deployment
+For more control over the deployment process:
+
+```bash
+# 1. Set up the YugabyteDB Operator
 ./scripts/install-operator.sh
-```
 
-### 2. Create namespaces and deploy YugabyteDB instances
-```bash
+# 2. Create namespaces and deploy YugabyteDB instances
 ./scripts/deploy-all-environments.sh
-```
 
-### 3. Configure database security (RBAC)
-```bash
+# 3. Configure database security (RBAC)
 ./scripts/setup-database-rbac.sh
 ```
+
+### Option 3: Infrastructure + Database Deployment
+If you need to deploy infrastructure first:
+
+```bash
+# Deploy infrastructure and complete stack
+cd terraform && terraform init && terraform apply -auto-approve && cd ..
+./scripts/deploy-complete-stack.sh --skip-terraform
+```
+
+## GCP Cloud Shell Deployment
+
+This project is optimized for deployment using GCP Cloud Shell:
+
+1. **Open Cloud Shell** in the Google Cloud Console
+2. **Clone your repository**:
+   ```bash
+   git clone <your-repo-url>
+   cd <your-repo-name>
+   ```
+3. **Connect to your GKE cluster**:
+   ```bash
+   gcloud container clusters get-credentials <cluster-name> --zone <zone> --project <project-id>
+   ```
+4. **Run deployment**:
+   ```bash
+   ./scripts/deploy-complete-stack.sh
+   ```
+
+All required tools (`kubectl`, `helm`, `gcloud`, `terraform`) are pre-installed in Cloud Shell.
 
 ## File Structure
 
@@ -47,18 +84,30 @@ This repository contains all the necessary configuration files and scripts to de
 │   │   └── namespace.yaml
 │   ├── namespaces/
 │   │   └── environments.yaml
-│   └── clusters/
-│       ├── codet-dev-yb-cluster.yaml
-│       ├── codet-staging-yb-cluster.yaml
-│       └── codet-prod-yb-cluster.yaml
+│   ├── clusters/
+│   │   ├── codet-dev-yb-cluster.yaml
+│   │   ├── codet-staging-yb-cluster.yaml
+│   │   └── codet-prod-yb-cluster.yaml
+│   ├── monitoring/
+│   │   ├── alert-rules.yaml
+│   │   └── prometheus-stack.yaml
+│   └── policies/
+│       ├── network-policies.yaml
+│       └── pod-disruption-budgets.yaml
 ├── scripts/
+│   ├── deploy-complete-stack.sh
 │   ├── install-operator.sh
 │   ├── deploy-all-environments.sh
 │   ├── setup-database-rbac.sh
-│   └── scale-cluster.sh
-└── sql/
-    ├── rbac-setup.sql
-    └── example-procedures.sql
+│   ├── scale-cluster.sh
+│   └── generate-secrets.sh
+├── sql/
+│   ├── rbac-setup.sql
+│   └── example-procedures.sql
+└── terraform/
+    ├── main.tf
+    ├── variables.tf
+    └── outputs.tf
 ```
 
 ## Scaling
@@ -86,6 +135,26 @@ Each YugabyteDB instance includes:
 - Built-in web UI for monitoring
 - Prometheus metrics endpoints
 - Kubernetes-native health checks
+- Grafana dashboards (deployed with monitoring stack)
+
+Access monitoring:
+```bash
+# Access Grafana
+kubectl port-forward -n monitoring svc/grafana 3000:3000
+# Open: http://localhost:3000
+
+# Access YugabyteDB web UI
+kubectl port-forward -n codet-dev-yb svc/codet-dev-yb-yb-master-ui 7000:7000
+# Open: http://localhost:7000
+```
+
+## CI/CD with Bitbucket Pipelines
+
+The included `bitbucket-pipelines.yml` provides:
+- **Automatic validation** on pull requests
+- **Manual deployment gates** for staging/production
+- **Infrastructure deployment** pipelines
+- **Testing with Kind clusters**
 
 ## Support
 

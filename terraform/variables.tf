@@ -17,7 +17,7 @@ variable "region" {
 variable "vpc_name" {
   description = "Name of the VPC network"
   type        = string
-  default     = "yugabyte-secure-vpc"
+  default     = "yugabyte-tf-vpc"
 }
 
 variable "subnet_name" {
@@ -61,32 +61,32 @@ variable "cluster_name" {
 variable "min_cpu" {
   description = "Minimum CPU cores for cluster autoscaling"
   type        = number
-  default     = 10
+  default     = 2
 }
 
 variable "max_cpu" {
   description = "Maximum CPU cores for cluster autoscaling"
   type        = number
-  default     = 100
+  default     = 20
 }
 
 variable "min_memory" {
   description = "Minimum memory in GB for cluster autoscaling"
   type        = number
-  default     = 40
+  default     = 8
 }
 
 variable "max_memory" {
   description = "Maximum memory in GB for cluster autoscaling"
   type        = number
-  default     = 400
+  default     = 40
 }
 
 # General Purpose Node Pool Configuration
 variable "general_machine_type" {
   description = "Machine type for general purpose nodes"
   type        = string
-  default     = "e2-standard-4"
+  default     = "e2-micro"
 }
 
 variable "general_min_nodes" {
@@ -98,14 +98,14 @@ variable "general_min_nodes" {
 variable "general_max_nodes" {
   description = "Maximum nodes in general purpose pool"
   type        = number
-  default     = 10
+  default     = 3
 }
 
 # YugabyteDB TServer Node Pool Configuration
 variable "tserver_machine_type" {
   description = "Machine type for YugabyteDB TServer nodes"
   type        = string
-  default     = "n2-highmem-4"
+  default     = "e2-standard-2"
 }
 
 variable "tserver_min_nodes" {
@@ -117,7 +117,7 @@ variable "tserver_min_nodes" {
 variable "tserver_max_nodes" {
   description = "Maximum nodes in TServer pool"
   type        = number
-  default     = 15
+  default     = 3
 }
 
 # Environment Configuration

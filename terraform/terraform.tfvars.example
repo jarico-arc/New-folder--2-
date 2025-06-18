@@ -1,10 +1,10 @@
-# YugabyteDB Infrastructure - Example Variables
-# Copy this file to terraform.tfvars and update with your actual values
+# YugabyteDB Infrastructure - MINIMAL COST Configuration
+# Project: codet-dev-d5157 - Optimized for lowest possible cost
 
-project_id = "your-gcp-project-id"
+project_id = "codet-dev-d5157"
 region     = "us-central1"
 
-vpc_name    = "yugabyte-secure-vpc"
+vpc_name    = "yugabyte-tf-vpc"
 subnet_name = "yugabyte-subnet-us-central1"
 subnet_cidr = "10.0.1.0/24"
 
@@ -12,39 +12,44 @@ pods_cidr     = "10.1.0.0/16"
 services_cidr = "10.2.0.0/16"
 master_cidr   = "172.16.0.0/28"
 
-cluster_name = "yugabyte-cluster"
+cluster_name = "codet-yugabyte-cluster"
 
-min_cpu    = 10
-max_cpu    = 100
-min_memory = 40
-max_memory = 400
+# EXTREME COST OPTIMIZATION
+min_cpu    = 1   # Absolute minimum
+max_cpu    = 6   # Keep very low
+min_memory = 4   # Absolute minimum
+max_memory = 12  # Keep very low
 
-general_machine_type = "e2-standard-4"
+# Use smallest possible machine types
+general_machine_type = "e2-micro"      # FREE TIER eligible
 general_min_nodes   = 1
-general_max_nodes   = 10
+general_max_nodes   = 2                # Minimal scaling
 
-tserver_machine_type = "n2-highmem-4"
+tserver_machine_type = "e2-small"      # Smallest for database workload
 tserver_min_nodes   = 0
-tserver_max_nodes   = 15
+tserver_max_nodes   = 2                # Minimal scaling
 
-environment = "prod"
+environment = "dev"  # Development for cost savings
 
 labels = {
   managed-by = "terraform"
   project    = "yugabytedb-deployment"
-  team       = "devops"
+  team       = "codet-dev"
+  cost       = "minimal"
+  owner      = "codet"
 }
 
-backup_enabled        = true
-backup_retention_days = 30
+# MAXIMUM COST SAVINGS
+backup_enabled        = false          # No backups
+backup_retention_days = 1              # Minimal retention
 
-monitoring_enabled = true
-logging_enabled    = true
+monitoring_enabled = false             # No monitoring
+logging_enabled    = false             # No logging
 
-enable_binary_authorization = true
-enable_network_policy      = true
-enable_private_nodes       = true
-enable_workload_identity   = true
+enable_binary_authorization = false    # Disabled
+enable_network_policy      = false     # Disabled
+enable_private_nodes       = true      # Keep for security
+enable_workload_identity   = false     # Disabled
 
 maintenance_start_time = "2023-01-01T02:00:00Z"
 maintenance_end_time   = "2023-01-01T06:00:00Z"
