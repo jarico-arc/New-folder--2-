@@ -252,14 +252,8 @@ resource "google_container_cluster" "yugabyte_cluster" {
     }
   }
 
-  # ✅ FIXED: Simplified maintenance policy
-  maintenance_policy {
-    recurring_window {
-      start_time = "2024-12-21T03:00:00Z"
-      end_time   = "2024-12-21T07:00:00Z"
-      recurrence = "FREQ=WEEKLY;BYDAY=SA"
-    }
-  }
+  # ✅ FIXED: Use default GKE maintenance policy (no custom maintenance window)
+  # maintenance_policy removed to avoid date validation issues
 
   # ✅ FIXED: Basic monitoring and logging (removed problematic workload monitoring)
   logging_config {
