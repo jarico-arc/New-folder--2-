@@ -1,0 +1,67 @@
+# YugabyteDB Helm Chart Values
+# Optimized for cost-efficient deployment on GKE
+
+# Resource specifications
+resource:
+  master:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  tserver:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 2Gi
+
+# Replica configuration for development
+replicas:
+  master: 1
+  tserver: 1
+
+# Master node configuration
+master:
+  nodeSelector:
+    node-pool: general-purpose
+  tolerations: []
+
+# TServer node configuration  
+tserver:
+  nodeSelector:
+    node-pool: yugabyte-tserver
+  tolerations:
+    - key: "yugabyte.com/tserver"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+# Storage configuration
+storage:
+  master:
+    count: 1
+    size: 10Gi
+    storageClass: standard-rwo
+  tserver:
+    count: 1
+    size: 100Gi
+    storageClass: standard-rwo
+
+# Service configuration
+Services:
+  enabled: true
+
+# Disable some features for cost optimization
+isMultiAz: false
+AZ: us-central1-a
+
+# Security and networking
+networkAnnotation: {}
+commonLabels: {}
+
+# YugabyteD UI configuration
+yugabytedUi:
+  enabled: true 
