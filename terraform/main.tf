@@ -252,25 +252,18 @@ resource "google_container_cluster" "yugabyte_cluster" {
     }
   }
 
-  # ✅ FIXED: Proper maintenance policy with calculated windows
+  # ✅ FIXED: Simplified maintenance policy
   maintenance_policy {
     recurring_window {
-      start_time = local.maintenance_start_time
-      end_time   = local.maintenance_end_time
-      recurrence = var.maintenance_recurrence
+      start_time = "2024-12-21T03:00:00Z"
+      end_time   = "2024-12-21T07:00:00Z"
+      recurrence = "FREQ=WEEKLY;BYDAY=SA"
     }
   }
 
-  # ✅ FIXED: Enhanced monitoring and logging for production
-  monitoring_config {
-    enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"]
-    managed_prometheus {
-      enabled = var.monitoring_enabled
-    }
-  }
-
+  # ✅ FIXED: Basic monitoring and logging (removed problematic workload monitoring)
   logging_config {
-    enable_components = ["SYSTEM_COMPONENTS", "WORKLOADS"]
+    enable_components = ["SYSTEM_COMPONENTS"]
   }
 
   depends_on = [
