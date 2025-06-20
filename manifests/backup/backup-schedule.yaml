@@ -1,0 +1,279 @@
+# Comprehensive Backup and Disaster Recovery Schedule
+# RPO ≤ 15 min, RTO ≤ 60 min for regional disaster
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-config
+  namespace: yb-prod
+data:
+  gcs-bucket: "yugabytedb-backups-prod"
+  retention-days: "30"
+  full-backup-schedule: "0 2 * * 0"  # Weekly full backup on Sunday 2 AM
+  incremental-schedule: "*/15 * * * *"  # Incremental every 15 minutes
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yugabyte-full-backup
+  namespace: yb-prod
+spec:
+  schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: yugabyte-backup-sa
+          containers:
+          - name: backup
+            image: yugabytedb/yugabyte:2024.1.2.0-b77
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Starting full backup at $(date)"
+              
+              # Get master addresses
+              MASTERS=$(kubectl get pods -n yb-prod -l app=yb-master -o jsonpath='{range .items[*]}{.status.podIP}:7100{","}{end}' | sed 's/,$//')
+              
+              # Create snapshot
+              SNAPSHOT_ID=$(yb-admin --master_addresses=$MASTERS create_snapshot ysql.yugabyte | grep "Snapshot id:" | awk '{print $3}')
+              echo "Created snapshot: $SNAPSHOT_ID"
+              
+              # Export to GCS
+              ysql_dump --host=yb-tserver-service --port=5433 --username=yugabyte \
+                --dbname=yugabyte --verbose \
+                --format=custom --compress=9 \
+                --file=/tmp/backup_$(date +%Y%m%d_%H%M%S).dump
+              
+              # Upload to GCS
+              gsutil cp /tmp/backup_*.dump gs://${GCS_BUCKET}/full-backups/
+              
+              # Store snapshot metadata
+              echo "{\"snapshot_id\":\"$SNAPSHOT_ID\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"type\":\"full\"}" > /tmp/snapshot_metadata.json
+              gsutil cp /tmp/snapshot_metadata.json gs://${GCS_BUCKET}/metadata/
+              
+              echo "Full backup completed successfully"
+            env:
+            - name: GCS_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: gcs-bucket
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: yugabyte-auth-secret
+                  key: ysql-password
+            volumeMounts:
+            - name: gcs-credentials
+              mountPath: /etc/gcs
+              readOnly: true
+          volumes:
+          - name: gcs-credentials
+            secret:
+              secretName: gcs-backup-credentials
+          restartPolicy: OnFailure
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yugabyte-incremental-backup
+  namespace: yb-prod
+spec:
+  schedule: "*/15 * * * *"  # Every 15 minutes for RPO compliance
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: yugabyte-backup-sa
+          containers:
+          - name: incremental-backup
+            image: yugabytedb/yugabyte:2024.1.2.0-b77
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Starting incremental backup at $(date)"
+              
+              # Get master addresses
+              MASTERS=$(kubectl get pods -n yb-prod -l app=yb-master -o jsonpath='{range .items[*]}{.status.podIP}:7100{","}{end}' | sed 's/,$//')
+              
+              # Create incremental snapshot
+              SNAPSHOT_ID=$(yb-admin --master_addresses=$MASTERS create_snapshot ysql.yugabyte | grep "Snapshot id:" | awk '{print $3}')
+              echo "Created incremental snapshot: $SNAPSHOT_ID"
+              
+              # Export transaction logs
+              yb-admin --master_addresses=$MASTERS export_snapshot $SNAPSHOT_ID /tmp/snapshot_${SNAPSHOT_ID}
+              
+              # Compress and upload
+              tar -czf /tmp/incremental_$(date +%Y%m%d_%H%M%S).tar.gz /tmp/snapshot_${SNAPSHOT_ID}
+              gsutil cp /tmp/incremental_*.tar.gz gs://${GCS_BUCKET}/incremental-backups/
+              
+              # Store metadata
+              echo "{\"snapshot_id\":\"$SNAPSHOT_ID\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"type\":\"incremental\"}" > /tmp/incremental_metadata.json
+              gsutil cp /tmp/incremental_metadata.json gs://${GCS_BUCKET}/metadata/incremental_$(date +%Y%m%d_%H%M%S).json
+              
+              echo "Incremental backup completed successfully"
+            env:
+            - name: GCS_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: gcs-bucket
+            volumeMounts:
+            - name: gcs-credentials
+              mountPath: /etc/gcs
+              readOnly: true
+          volumes:
+          - name: gcs-credentials
+            secret:
+              secretName: gcs-backup-credentials
+          restartPolicy: OnFailure
+
+---
+# Backup cleanup job (retain 30 days)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yugabyte-backup-cleanup
+  namespace: yb-prod
+spec:
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: yugabyte-backup-sa
+          containers:
+          - name: cleanup
+            image: google/cloud-sdk:alpine
+            command:
+            - /bin/bash
+            - -c
+            - |
+              set -e
+              echo "Starting backup cleanup at $(date)"
+              
+              # Clean up backups older than 30 days
+              gsutil -m rm -r gs://${GCS_BUCKET}/full-backups/backup_$(date -d '30 days ago' +%Y%m%d)_* || true
+              gsutil -m rm -r gs://${GCS_BUCKET}/incremental-backups/incremental_$(date -d '30 days ago' +%Y%m%d)_* || true
+              gsutil -m rm -r gs://${GCS_BUCKET}/metadata/incremental_$(date -d '30 days ago' +%Y%m%d)_* || true
+              
+              echo "Backup cleanup completed"
+            env:
+            - name: GCS_BUCKET
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-config
+                  key: gcs-bucket
+            volumeMounts:
+            - name: gcs-credentials
+              mountPath: /etc/gcs
+              readOnly: true
+          volumes:
+          - name: gcs-credentials
+            secret:
+              secretName: gcs-backup-credentials
+          restartPolicy: OnFailure
+
+---
+# Service Account for backup operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: yugabyte-backup-sa
+  namespace: yb-prod
+  annotations:
+    iam.gke.io/gcp-service-account: yugabyte-backup-sa@PROJECT_ID.iam.gserviceaccount.com
+
+---
+# RBAC for backup service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: yb-prod
+  name: yugabyte-backup-role
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["secrets", "configmaps"]
+  verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: yugabyte-backup-binding
+  namespace: yb-prod
+subjects:
+- kind: ServiceAccount
+  name: yugabyte-backup-sa
+  namespace: yb-prod
+roleRef:
+  kind: Role
+  name: yugabyte-backup-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# DR Failover Job Template (manual trigger)
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: yugabyte-dr-failover
+  namespace: yb-prod
+  labels:
+    dr-operation: failover
+spec:
+  template:
+    spec:
+      serviceAccountName: yugabyte-backup-sa
+      containers:
+      - name: dr-failover
+        image: yugabytedb/yugabyte:2024.1.2.0-b77
+        command:
+        - /bin/bash
+        - -c
+        - |
+          set -e
+          echo "Starting DR failover procedure at $(date)"
+          
+          # Step 1: Stop production cluster gracefully
+          echo "Stopping production cluster..."
+          kubectl scale statefulset yb-master -n yb-prod --replicas=0
+          kubectl scale statefulset yb-tserver -n yb-prod --replicas=0
+          
+          # Step 2: Promote DR cluster
+          echo "Promoting DR cluster..."
+          DR_MASTERS=$(kubectl get pods -n yb-dr -l app=yb-master -o jsonpath='{range .items[*]}{.status.podIP}:7100{","}{end}' | sed 's/,$//')
+          yb-admin --master_addresses=$DR_MASTERS setup_universe_replication promote
+          
+          # Step 3: Update DNS to point to DR cluster
+          echo "Updating Cloud DNS..."
+          gcloud dns record-sets transaction start --zone=yugabyte-zone
+          gcloud dns record-sets transaction remove --zone=yugabyte-zone \
+            --name=yugabyte.company.com --type=A --ttl=300 \
+            --records="PROD_CLUSTER_IP"
+          gcloud dns record-sets transaction add --zone=yugabyte-zone \
+            --name=yugabyte.company.com --type=A --ttl=60 \
+            --records="DR_CLUSTER_IP"
+          gcloud dns record-sets transaction execute --zone=yugabyte-zone
+          
+          echo "DR failover completed successfully. RTO target: 60 minutes"
+          
+          # Step 4: Notify stakeholders
+          curl -X POST "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d '{"text":"🚨 PRODUCTION: DR failover completed. YugabyteDB now running on DR cluster."}'
+        env:
+        - name: PROD_CLUSTER_IP
+          value: "10.1.0.100"  # Replace with actual production IP
+        - name: DR_CLUSTER_IP  
+          value: "10.2.0.100"  # Replace with actual DR IP
+      restartPolicy: Never 

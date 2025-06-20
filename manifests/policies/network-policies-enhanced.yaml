@@ -1,0 +1,374 @@
+# Enhanced Zero-Trust Network Policies for YugabyteDB
+# Implements strict network segmentation with explicit allow rules
+
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: yb-prod
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-yugabyte-cluster-internal
+  namespace: yb-prod
+spec:
+  podSelector:
+    matchLabels:
+      app: yb-master
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow master-to-master communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+    ports:
+    - protocol: TCP
+      port: 7100  # Master RPC
+    - protocol: TCP
+      port: 7000  # Master UI
+  # Allow tserver-to-master communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+    ports:
+    - protocol: TCP
+      port: 7100  # Master RPC
+  # Allow monitoring scraping
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9300  # Prometheus metrics
+  egress:
+  # Allow master-to-master
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+    ports:
+    - protocol: TCP
+      port: 7100
+  # Allow master-to-tserver
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+    ports:
+    - protocol: TCP
+      port: 9100  # TServer RPC
+  # DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-yugabyte-tserver-traffic
+  namespace: yb-prod
+spec:
+  podSelector:
+    matchLabels:
+      app: yb-tserver
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow tserver-to-tserver communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+    ports:
+    - protocol: TCP
+      port: 9100  # TServer RPC
+    - protocol: TCP
+      port: 6379  # Redis API
+  # Allow application access to YSQL/YCQL (only from API gateway)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: api-gateway
+    ports:
+    - protocol: TCP
+      port: 5433  # YSQL
+    - protocol: TCP
+      port: 9042  # YCQL
+  # Allow CDC/Debezium access
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kafka
+      podSelector:
+        matchLabels:
+          app: debezium
+    ports:
+    - protocol: TCP
+      port: 5433  # YSQL for CDC
+  # Allow monitoring
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9000  # TServer metrics
+    - protocol: TCP
+      port: 11000 # YCQL metrics
+    - protocol: TCP
+      port: 13000 # YSQL metrics
+  egress:
+  # Allow communication to masters
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-master
+    ports:
+    - protocol: TCP
+      port: 7100
+  # Allow tserver-to-tserver
+  - to:
+    - podSelector:
+        matchLabels:
+          app: yb-tserver
+    ports:
+    - protocol: TCP
+      port: 9100
+  # DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Network policy for Debezium CDC access
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-debezium-cdc-access
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      app: debezium
+  policyTypes:
+  - Egress
+  egress:
+  # Allow connection to YugabyteDB for CDC
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: yb-prod
+      podSelector:
+        matchLabels:
+          app: yb-tserver
+    ports:
+    - protocol: TCP
+      port: 5433  # YSQL
+  # Allow connection to YB masters for CDC setup
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: yb-prod
+      podSelector:
+        matchLabels:
+          app: yb-master
+    ports:
+    - protocol: TCP
+      port: 7100  # Master RPC
+  # Allow connection to Redpanda
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redpanda
+    ports:
+    - protocol: TCP
+      port: 9092  # Kafka
+  # DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Network policy for Redpanda cluster
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redpanda-cluster-communication
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: redpanda
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow broker-to-broker communication
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redpanda
+    ports:
+    - protocol: TCP
+      port: 9092  # Kafka
+    - protocol: TCP
+      port: 8082  # Schema Registry
+    - protocol: TCP
+      port: 9644  # Admin API
+  # Allow Debezium to produce
+  - from:
+    - podSelector:
+        matchLabels:
+          app: debezium
+    ports:
+    - protocol: TCP
+      port: 9092
+  # Allow monitoring
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9644  # Metrics
+  # Allow API gateway for consumer APIs
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: api-gateway
+    ports:
+    - protocol: TCP
+      port: 9092
+  egress:
+  # Allow broker-to-broker
+  - to:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/name: redpanda
+    ports:
+    - protocol: TCP
+      port: 9092
+    - protocol: TCP
+      port: 8082
+    - protocol: TCP
+      port: 9644
+  # DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Block direct database access (enforce API-only access)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: block-direct-db-access
+  namespace: yb-prod
+spec:
+  podSelector:
+    matchLabels:
+      app: yb-tserver
+  policyTypes:
+  - Ingress
+  ingress:
+  # Explicitly deny all database access except from allowed sources
+  # (API gateway and CDC connector)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: api-gateway
+    ports:
+    - protocol: TCP
+      port: 5433
+    - protocol: TCP
+      port: 9042
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kafka
+      podSelector:
+        matchLabels:
+          app: debezium
+    ports:
+    - protocol: TCP
+      port: 5433
+  # All other database access is implicitly denied
+
+---
+# Allow monitoring namespace to scrape all metrics
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring-scraping
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  # Allow scraping metrics from all namespaces
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 9300  # YB Master metrics
+    - protocol: TCP
+      port: 9000  # YB TServer metrics
+    - protocol: TCP
+      port: 9644  # Redpanda metrics
+    - protocol: TCP
+      port: 8080  # Debezium metrics
+  # DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+
+---
+# Network policy for ArgoCD GitOps
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-argocd-gitops
+  namespace: argocd
+spec:
+  podSelector: {}
+  policyTypes:
+  - Egress
+  egress:
+  # Allow ArgoCD to manage all namespaces
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443   # Kubernetes API
+    - protocol: TCP
+      port: 6443  # Kubernetes API (alternate)
+  # Allow Git repository access
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 22    # SSH Git
+    - protocol: TCP
+      port: 443   # HTTPS Git
+  # DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53

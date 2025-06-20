@@ -1,0 +1,126 @@
+# Redpanda Production Values
+# 3-broker cluster with HA configuration
+
+statefulset:
+  replicas: 3  # HA cluster
+
+storage:
+  persistentVolume:
+    enabled: true
+    size: 500Gi
+    storageClass: pd-ssd
+    labels:
+      app: redpanda
+      environment: production
+
+resources:
+  requests:
+    cpu: 2
+    memory: 4Gi
+  limits:
+    cpu: 4
+    memory: 8Gi
+
+config:
+  cluster:
+    # Auto-create topics with proper settings
+    auto_create_topics_enabled: true
+    default_topic_replications: 3
+    default_topic_partitions: 12
+    
+    # Retention settings for CDC
+    log_retention_bytes: 107374182400  # 100GB per partition
+    log_retention_ms: 604800000  # 7 days
+    
+    # Performance tuning
+    group_topic_partitions: 16
+    tx_topic_partitions: 16
+    id_allocator_replication: 3
+
+  tuning:
+    # Optimize for CDC workloads
+    tune_network: true
+    tune_disk_scheduler: true
+    tune_disk_nomerges: true
+    tune_disk_write_cache: true
+    tune_cpu: true
+    tune_aio_events: true
+    tune_clocksource: true
+    tune_swappiness: true
+    tune_transparent_hugepages: true
+
+# Enable monitoring
+monitoring:
+  enabled: true
+  scrapeInterval: 30s
+
+# Service configuration
+service:
+  type: ClusterIP
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+
+# External access (for debugging only)
+external:
+  enabled: false  # Keep disabled for security
+
+# Pod anti-affinity for HA
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: redpanda
+          app.kubernetes.io/component: redpanda
+      topologyKey: kubernetes.io/hostname
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: redpanda
+            app.kubernetes.io/component: redpanda
+        topologyKey: topology.kubernetes.io/zone
+
+# Node selector for dedicated Kafka nodes (optional)
+nodeSelector: {}
+  # workload-type: kafka
+
+# Tolerations
+tolerations: []
+
+# Security context
+podSecurityContext:
+  fsGroup: 101
+  runAsUser: 101
+  runAsNonRoot: true
+
+# TLS configuration
+tls:
+  enabled: true
+  certs:
+    default:
+      caEnabled: true
+
+# Auth configuration  
+auth:
+  sasl:
+    enabled: true
+    mechanism: SCRAM-SHA-512
+    secretRef: redpanda-users
+    users:
+      - name: yugabyte-cdc
+        mechanism: SCRAM-SHA-512
+      - name: consumer-api
+        mechanism: SCRAM-SHA-512
+      - name: admin
+        mechanism: SCRAM-SHA-512
+
+# Console configuration
+console:
+  enabled: true
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi 

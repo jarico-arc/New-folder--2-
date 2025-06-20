@@ -10,7 +10,7 @@ metadata:
 spec:
   image:
     repository: yugabytedb/yugabyte
-    tag: 2.20.2.0-b98
+    tag: 2.22.0.0-b15  # Updated to latest LTS
   # ✅ FIXED: Proper replication for production
   replicationFactor: 3  # ✅ FIXED: High availability
 
@@ -30,7 +30,7 @@ spec:
       limits:
         cpu: "4"       # ✅ FIXED: Increased from 1
         memory: 8Gi    # ✅ FIXED: Increased from 2Gi
-    # Production-grade affinity
+    # Multi-zone anti-affinity for HA
     affinity:
       nodeAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
@@ -51,10 +51,26 @@ spec:
               operator: In
               values: ["yb-master"]
           topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values: ["yb-master"]
+            topologyKey: topology.kubernetes.io/zone
     # ✅ FIXED: ENABLE Authentication and TLS for production
     enableAuth: true
+    authCredentials:
+      ysql:
+        user: yugabyte
+        passwordSecretName: yugabyte-auth-secret
     tls:
       enabled: true
+      rootCA:
+        cert: yugabyte-tls-ca-cert
+        key: yugabyte-tls-ca-key
 
   # T-Server Node Configuration (production-grade)
   tserver:
@@ -69,15 +85,21 @@ spec:
       limits:
         cpu: "8"       # ✅ FIXED: Increased from 1
         memory: 16Gi   # ✅ FIXED: Increased from 2Gi
-    # Add tolerations for dedicated tserver nodes
+    # Tolerations for dedicated tserver nodes
     tolerations:
     - key: "yugabyte.com/tserver"
       operator: "Equal"
       value: "true"
       effect: "NoSchedule"
-    # Production-grade affinity
+    # Multi-zone anti-affinity for HA
     affinity:
       nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: workload-type
+              operator: In
+              values: ["yugabyte-tserver"]
         preferredDuringSchedulingIgnoredDuringExecution:
         - weight: 100
           preference:
@@ -85,17 +107,9 @@ spec:
             - key: node.kubernetes.io/instance-type
               operator: In
               values:
-              - n2-standard-8
+              - n2-highmem-4
               - n2-highmem-8
-              - n2-highmem-16
-        # Prefer tserver nodes if available
-        - weight: 80
-          preference:
-            matchExpressions:
-            - key: node-pool
-              operator: In
-              values:
-              - yugabyte-tserver
+              - n2-standard-8
       podAntiAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
         - labelSelector:
@@ -104,10 +118,26 @@ spec:
               operator: In
               values: ["yb-tserver"]
           topologyKey: kubernetes.io/hostname
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values: ["yb-tserver"]
+            topologyKey: topology.kubernetes.io/zone
     # ✅ FIXED: ENABLE Authentication and TLS for production
     enableAuth: true
+    authCredentials:
+      ysql:
+        user: yugabyte
+        passwordSecretName: yugabyte-auth-secret
     tls:
       enabled: true
+      rootCA:
+        cert: yugabyte-tls-ca-cert
+        key: yugabyte-tls-ca-key
 
   # ✅ FIXED: ENABLE monitoring for production
   monitoring:
@@ -117,13 +147,19 @@ spec:
   serviceMonitor:
     enabled: true
 
+  # PodDisruptionBudgets for HA
+  podDisruptionBudget:
+    maxUnavailable:
+      master: 1
+      tserver: 1
+
   # Production resource quotas
   resourceQuota:
     enabled: true
     hard:
-      requests.cpu: "24"     # ✅ FIXED: Increased from 3
-      requests.memory: "48Gi" # ✅ FIXED: Increased from 4Gi
-      persistentvolumeclaims: "10" # ✅ FIXED: Increased from 3
+      requests.cpu: "30"      # Increased for 3x3 + headroom
+      requests.memory: "60Gi"  # Increased for 3x3 + headroom
+      persistentvolumeclaims: "10"
   
   # ✅ FIXED: Production-grade configurations
   gflags:
@@ -136,7 +172,11 @@ spec:
       tablet_split_size_threshold_bytes: "10737418240"  # 10GB
       tablet_split_low_phase_size_threshold_bytes: "5368709120"  # 5GB
       # CDC optimizations
-      cdc_state_checkpoint_update_interval_ms: 15000
+      cdc_state_checkpoint_update_interval_ms: "15000"
+      # Multi-zone settings
+      placement_cloud: "gcp"
+      placement_region: "us-central1"
+      placement_zone: "us-central1-a,us-central1-b,us-central1-f"
       
     tserver:
       # Security settings
@@ -147,11 +187,15 @@ spec:
       memstore_size_mb: "1024"
       global_memstore_size_mb_max: "2048"
       # CDC optimizations
-      cdc_state_checkpoint_update_interval_ms: 15000
-      cdc_checkpoint_opid_interval_ms: 60000
-      update_min_cdc_indices_interval_secs: 60
-      cdc_max_stream_intent_records: 1000
-      log_min_seconds_to_retain: 86400  # Keep WAL for 24 hours
+      cdc_state_checkpoint_update_interval_ms: "15000"
+      cdc_checkpoint_opid_interval_ms: "60000"
+      update_min_cdc_indices_interval_secs: "60"
+      cdc_max_stream_intent_records: "1000"
+      log_min_seconds_to_retain: "86400"  # Keep WAL for 24 hours
+      # Multi-zone settings
+      placement_cloud: "gcp"
+      placement_region: "us-central1"
+      placement_zone: "us-central1-a,us-central1-b,us-central1-f"
 
   # ✅ FIXED: Complete backup configuration for production
   backup:

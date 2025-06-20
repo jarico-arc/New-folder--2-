@@ -1,167 +1,150 @@
-# YugabyteDB Production Environment Values
-# SECURE configuration for production
+# YugabyteDB Helm Production Values
+# Based on comprehensive end-to-end plan for 99.95% availability
 
-image:
-  repository: yugabytedb/yugabyte
-  tag: "2.20.2.0-b98"
+replicaCount:
+  master: 3       # one per AZ for quorum
+  tserver: 5      # uneven spreads to handle 2 node loss
 
-# HIGH AVAILABILITY: Increase replication for production
-replicas:
-  master: 3    # ✅ FIXED: Proper quorum
-  tserver: 3   # ✅ FIXED: High availability
-
-# Enable load balancer for production
-enableLoadBalancer: true
-
-# PRODUCTION RESOURCES: Proper allocation
 resource:
   master:
-    requests:
-      cpu: "2"       # ✅ FIXED: Increased from 0.5
-      memory: "4Gi"  # ✅ FIXED: Increased from 1Gi
+    requests: 
+      cpu: 500m 
+      memory: 1Gi
     limits:
-      cpu: "4"       # ✅ FIXED: Increased from 1
-      memory: "8Gi"  # ✅ FIXED: Increased from 2Gi
+      cpu: "2"
+      memory: 4Gi
   tserver:
-    requests:
-      cpu: "4"       # ✅ FIXED: Increased from 1
-      memory: "8Gi"  # ✅ FIXED: Increased from 2Gi
+    requests: 
+      cpu: "1" 
+      memory: 4Gi
     limits:
-      cpu: "8"       # ✅ FIXED: Increased from 1
-      memory: "16Gi" # ✅ FIXED: Increased from 2Gi
+      cpu: "4"
+      memory: 8Gi
 
-# PRODUCTION STORAGE: SSD for performance
+placement:
+  cloud: gcp
+  region: us-central1
+  zones:
+    - us-central1-a
+    - us-central1-b
+    - us-central1-c
+
 storage:
   master:
-    size: "100Gi"           # ✅ FIXED: Increased from 10Gi
-    storageClass: "pd-ssd"  # ✅ FIXED: SSD for performance
+    count: 1
+    size: 100Gi
+    storageClass: pd-ssd-regional
   tserver:
-    size: "500Gi"           # ✅ FIXED: Increased from 20Gi
-    storageClass: "pd-ssd"  # ✅ FIXED: SSD for performance
+    count: 1
+    size: 500Gi
+    storageClass: pd-ssd-regional
 
-# ✅ FIXED: ENABLE Authentication for production
-auth:
-  enabled: true
-  useSecretFile: true
+# Performance and CDC optimizations
+masterGFlags:
+  enable_ysql: "true"
+  ysql_enable_auth: "true"
+  enable_automatic_tablet_splitting: "true"
+  tablet_split_low_phase_size_threshold_bytes: "536870912"   # 512 MB
+  tablet_split_high_phase_size_threshold_bytes: "10737418240" # 10 GB
+  cdc_state_checkpoint_update_interval_ms: "15000"
+  placement_cloud: "gcp"
+  placement_region: "us-central1"
+  use_client_to_server_encryption: "true"
+  use_node_to_node_encryption: "true"
 
-# ✅ FIXED: ENABLE TLS for production
-tls:
-  enabled: true
-  certManager:
-    enabled: true
+tserverGFlags:
+  enable_ysql: "true"
+  ysql_enable_auth: "true"
+  enable_automatic_tablet_splitting: "true"
+  tablet_split_low_phase_size_threshold_bytes: "536870912"   # 512 MB
+  tablet_split_high_phase_size_threshold_bytes: "10737418240" # 10 GB
+  memstore_size_mb: "1024"
+  global_memstore_size_mb_max: "2048"
+  cdc_state_checkpoint_update_interval_ms: "15000"
+  cdc_checkpoint_opid_interval_ms: "60000"
+  update_min_cdc_indices_interval_secs: "60"
+  cdc_max_stream_intent_records: "1000"
+  log_min_seconds_to_retain: "86400"  # Keep WAL for 24 hours
+  placement_cloud: "gcp"
+  placement_region: "us-central1"
+  use_client_to_server_encryption: "true"
+  use_node_to_node_encryption: "true"
 
-# ✅ FIXED: ENABLE monitoring for production
-prometheus:
-  enabled: true
-
-serviceMonitor:
-  enabled: true
-
-# Node affinity for production workloads
-nodeSelector: {}
-
-affinity:
-  master:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        preference:
-          matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values:
-            - n2-standard-4    # ✅ FIXED: Better machine types
-            - n2-standard-8
-            - n2-highmem-4
-  tserver:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 100
-        preference:
-          matchExpressions:
-          - key: node.kubernetes.io/instance-type
-            operator: In
-            values:
-            - n2-standard-8    # ✅ FIXED: Better machine types
-            - n2-highmem-8
-            - n2-highmem-16
-      - weight: 80
-        preference:
-          matchExpressions:
-          - key: node-pool
-            operator: In
-            values:
-            - yugabyte-tserver
-
-# Add tolerations for dedicated tserver nodes
-tolerations:
-  tserver:
-  - key: "yugabyte.com/tserver"
-    operator: "Equal"
-    value: "true"
-    effect: "NoSchedule"
-
-# ✅ FIXED: Enable security features
+# RBAC and Security
 rbac:
   create: true
 
-podSecurityContext:
-  runAsNonRoot: true
-  runAsUser: 10001
-  fsGroup: 10001
-  seccompProfile:
-    type: RuntimeDefault
+tls:
+  enabled: true
+  nodeToNode: true
+  clientToServer: true
 
-securityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop:
-    - ALL
-  readOnlyRootFilesystem: false
-  runAsNonRoot: true
-  runAsUser: 10001
-
-# ✅ FIXED: Enable network policies
-networkPolicy:
+auth:
   enabled: true
 
-# ✅ FIXED: Enable backup for production
-backup:
-  enabled: true
-  retentionDays: 30
-  schedule: "0 2 * * *"  # Daily at 2 AM
+# Monitoring and Observability
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9300"
 
-# ✅ FIXED: Production-grade gflags
-gflags:
+# High Availability
+pdb:
+  master: 
+    maxUnavailable: 1
+  tserver: 
+    maxUnavailable: 1
+
+# Anti-affinity for fault tolerance
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchLabels:
+          component: yb-master
+      topologyKey: "kubernetes.io/hostname"
+    - labelSelector:
+        matchLabels:
+          component: yb-tserver  
+      topologyKey: "kubernetes.io/hostname"
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchLabels:
+            component: yb-master
+        topologyKey: "topology.kubernetes.io/zone"
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchLabels:
+            component: yb-tserver
+        topologyKey: "topology.kubernetes.io/zone"
+
+# Service configuration
+services:
   master:
-    # Security flags
-    use_client_to_server_encryption: "true"
-    use_node_to_node_encryption: "true"
-    certs_dir: "/opt/certs"
-    # Performance flags
-    tablet_split_size_threshold_bytes: "10737418240"  # 10GB
-    tablet_split_low_phase_size_threshold_bytes: "5368709120"  # 5GB
-    # CDC optimizations
-    cdc_state_checkpoint_update_interval_ms: 15000
-    
+    type: ClusterIP
   tserver:
-    # Security flags
-    use_client_to_server_encryption: "true"
-    use_node_to_node_encryption: "true"
-    certs_dir: "/opt/certs"
-    # Performance flags  
-    memstore_size_mb: "1024"
-    global_memstore_size_mb_max: "2048"
-    # CDC optimizations
-    cdc_state_checkpoint_update_interval_ms: 15000
-    cdc_checkpoint_opid_interval_ms: 60000
-    update_min_cdc_indices_interval_secs: 60
-    cdc_max_stream_intent_records: 1000
-    log_min_seconds_to_retain: 86400  # Keep WAL for 24 hours
+    type: ClusterIP
 
-# Labels
-labels:
-  environment: production
-  app: yugabytedb
-  security: enabled
-  backup: enabled 
+# Image configuration
+image:
+  repository: yugabytedb/yugabyte
+  tag: "2024.1.2.0-b77"
+  pullPolicy: IfNotPresent
+
+# Node tolerations for dedicated pools
+tolerations:
+  tserver:
+    - key: "yugabyte.com/tserver"
+      operator: "Equal"
+      value: "true"
+      effect: "NoSchedule"
+
+# Volume permissions and security
+securityContext:
+  enabled: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  runAsNonRoot: true 

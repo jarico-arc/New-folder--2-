@@ -1,287 +1,264 @@
-# Prometheus + Grafana Stack for YugabyteDB Monitoring
-# This deploys a complete monitoring solution
+# Comprehensive Prometheus Stack for YugabyteDB Monitoring
+# Includes SLO burn-rate rules and custom dashboards
 
----
-# Monitoring Namespace
 apiVersion: v1
 kind: Namespace
 metadata:
   name: monitoring
   labels:
     name: monitoring
+    pod-security.kubernetes.io/enforce: restricted
 
 ---
-# Prometheus ConfigMap
-apiVersion: v1
-kind: ConfigMap
+apiVersion: argoproj.io/v1alpha1
+kind: Application
 metadata:
-  name: prometheus-config
-  namespace: monitoring
-data:
-  prometheus.yml: |
-    global:
-      scrape_interval: 15s
-      evaluation_interval: 15s
-    
-    rule_files:
-      - "/etc/prometheus/rules/*.yml"
-    
-    alerting:
-      alertmanagers:
-        - static_configs:
-            - targets:
-              - alertmanager:9093
-    
-    scrape_configs:
-      # YugabyteDB Master Nodes
-      - job_name: 'yugabytedb-master'
-        kubernetes_sd_configs:
-        - role: pod
-          namespaces:
-            names:
-            - codet-dev-yb
-            - codet-staging-yb
-            - codet-prod-yb
-        relabel_configs:
-        - source_labels: [__meta_kubernetes_pod_label_app]
-          action: keep
-          regex: yb-master
-        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-          action: keep
-          regex: true
-        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
-          action: replace
-          target_label: __address__
-          regex: ([^:]+)(?::\d+)?;(\d+)
-          replacement: $1:$2
-        - source_labels: [__meta_kubernetes_namespace]
-          target_label: namespace
-        - source_labels: [__meta_kubernetes_pod_name]
-          target_label: pod
-      
-      # YugabyteDB TServer Nodes
-      - job_name: 'yugabytedb-tserver'
-        kubernetes_sd_configs:
-        - role: pod
-          namespaces:
-            names:
-            - codet-dev-yb
-            - codet-staging-yb
-            - codet-prod-yb
-        relabel_configs:
-        - source_labels: [__meta_kubernetes_pod_label_app]
-          action: keep
-          regex: yb-tserver
-        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
-          action: keep
-          regex: true
-        - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
-          action: replace
-          target_label: __address__
-          regex: ([^:]+)(?::\d+)?;(\d+)
-          replacement: $1:$2
-        - source_labels: [__meta_kubernetes_namespace]
-          target_label: namespace
-        - source_labels: [__meta_kubernetes_pod_name]
-          target_label: pod
-
----
-# Prometheus Deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: prometheus
-  namespace: monitoring
+  name: kube-prometheus-stack
+  namespace: argocd
 spec:
-  replicas: 1
+  destination:
+    namespace: monitoring
+    server: https://kubernetes.default.svc
+  project: default
+  source:
+    chart: kube-prometheus-stack
+    repoURL: https://prometheus-community.github.io/helm-charts
+    targetRevision: "57.2.0"
+    helm:
+      values: |
+        # Global configuration
+        global:
+          rbac:
+            createAggregateClusterRoles: false
+        
+        # Prometheus configuration
+        prometheus:
+          prometheusSpec:
+            retention: 30d
+            retentionSize: "100GiB"
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: pd-ssd-regional
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 200Gi
+            resources:
+              requests:
+                cpu: "2"
+                memory: 8Gi
+              limits:
+                cpu: "4"
+                memory: 16Gi
+            # Service monitors for YugabyteDB
+            serviceMonitorSelectorNilUsesHelmValues: false
+            serviceMonitorSelector: {}
+            podMonitorSelectorNilUsesHelmValues: false
+            podMonitorSelector: {}
+            # Additional scrape configs for YugabyteDB
+            additionalScrapeConfigs:
+              - job_name: 'yugabyte-master'
+                kubernetes_sd_configs:
+                  - role: pod
+                    namespaces:
+                      names: ['yb-prod', 'yb-staging', 'yb-dev']
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_label_app]
+                    action: keep
+                    regex: yb-master
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: true
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+                    action: replace
+                    target_label: __address__
+                    regex: (.+)
+                    replacement: ${1}:9300
+              - job_name: 'yugabyte-tserver'
+                kubernetes_sd_configs:
+                  - role: pod
+                    namespaces:
+                      names: ['yb-prod', 'yb-staging', 'yb-dev']
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_pod_label_app]
+                    action: keep
+                    regex: yb-tserver
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: true
+                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+                    action: replace
+                    target_label: __address__
+                    regex: (.+)
+                    replacement: ${1}:9000
+        
+        # Grafana configuration
+        grafana:
+          adminPassword: "admin123!"  # Change in production
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          persistence:
+            enabled: true
+            storageClassName: pd-ssd-regional
+            size: 10Gi
+          # Custom dashboards for YugabyteDB
+          dashboardProviders:
+            dashboardproviders.yaml:
+              apiVersion: 1
+              providers:
+              - name: 'yugabyte'
+                orgId: 1
+                folder: 'YugabyteDB'
+                type: file
+                disableDeletion: false
+                editable: true
+                options:
+                  path: /var/lib/grafana/dashboards/yugabyte
+          dashboards:
+            yugabyte:
+              yugabyte-overview:
+                gnetId: 12620
+                revision: 1
+                datasource: Prometheus
+              yugabyte-cluster:
+                gnetId: 12621  
+                revision: 1
+                datasource: Prometheus
+          # Pre-configured data sources
+          additionalDataSources:
+            - name: Prometheus
+              type: prometheus
+              url: http://kube-prometheus-stack-prometheus:9090
+              isDefault: true
+        
+        # AlertManager configuration
+        alertmanager:
+          alertmanagerSpec:
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: pd-ssd-regional
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 10Gi
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+          config:
+            global:
+              smtp_smarthost: 'localhost:587'
+              smtp_from: 'alertmanager@company.com'
+            route:
+              group_by: ['alertname', 'cluster', 'service']
+              group_wait: 10s
+              group_interval: 10s
+              repeat_interval: 1h
+              receiver: 'web.hook'
+              routes:
+              - match:
+                  severity: critical
+                receiver: 'pager'
+              - match:
+                  severity: warning
+                receiver: 'slack'
+            receivers:
+            - name: 'web.hook'
+              webhook_configs:
+              - url: 'http://localhost:5001/webhook'
+            - name: 'pager'
+              webhook_configs:
+              - url: 'https://events.pagerduty.com/v2/enqueue'
+                http_config:
+                  bearer_token: 'your-pagerduty-key'
+            - name: 'slack'
+              slack_configs:
+              - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+                channel: '#alerts'
+                title: 'YugabyteDB Alert'
+                text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+
+---
+# Custom ServiceMonitor for YugabyteDB
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: yugabyte-monitoring
+  namespace: monitoring
+  labels:
+    app: yugabytedb
+    release: kube-prometheus-stack
+spec:
   selector:
     matchLabels:
-      app: prometheus
-  template:
-    metadata:
-      labels:
-        app: prometheus
-    spec:
-      containers:
-      - name: prometheus
-        image: prom/prometheus:v2.48.0
-        ports:
-        - containerPort: 9090
-        volumeMounts:
-        - name: config-volume
-          mountPath: /etc/prometheus
-        - name: storage-volume
-          mountPath: /prometheus
-        args:
-        - '--config.file=/etc/prometheus/prometheus.yml'
-        - '--storage.tsdb.path=/prometheus'
-        - '--web.console.libraries=/etc/prometheus/console_libraries'
-        - '--web.console.templates=/etc/prometheus/consoles'
-        - '--storage.tsdb.retention.time=15d'
-        - '--web.enable-lifecycle'
-      volumes:
-      - name: config-volume
-        configMap:
-          name: prometheus-config
-      - name: storage-volume
-        emptyDir: {}
+      app: yb-master
+  namespaceSelector:
+    matchNames:
+    - yb-prod
+    - yb-staging
+    - yb-dev
+  endpoints:
+  - port: http-ui
+    interval: 15s
+    path: /prometheus-metrics
+  - port: http-ycql-met
+    interval: 15s
+    path: /prometheus-metrics
 
 ---
-# Prometheus Service
-apiVersion: v1
-kind: Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
 metadata:
-  name: prometheus
+  name: yugabyte-tserver-monitoring
   namespace: monitoring
+  labels:
+    app: yugabytedb
+    release: kube-prometheus-stack
 spec:
-  selector:
-    app: prometheus
-  ports:
-  - port: 9090
-    targetPort: 9090
-  type: ClusterIP
-
----
-# Grafana ConfigMap for Dashboards
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-dashboards
-  namespace: monitoring
-data:
-  yugabytedb-overview.json: |
-    {
-      "dashboard": {
-        "id": null,
-        "title": "YugabyteDB Overview",
-        "tags": ["yugabytedb"],
-        "style": "dark",
-        "timezone": "browser",
-        "panels": [
-          {
-            "id": 1,
-            "title": "Master Nodes Status",
-            "type": "stat",
-            "targets": [
-              {
-                "expr": "up{job=\"yugabytedb-master\"}",
-                "legendFormat": "{{namespace}}/{{pod}}"
-              }
-            ],
-            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
-          },
-          {
-            "id": 2,
-            "title": "TServer Nodes Status", 
-            "type": "stat",
-            "targets": [
-              {
-                "expr": "up{job=\"yugabytedb-tserver\"}",
-                "legendFormat": "{{namespace}}/{{pod}}"
-              }
-            ],
-            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
-          },
-          {
-            "id": 3,
-            "title": "Database Connections",
-            "type": "graph",
-            "targets": [
-              {
-                "expr": "yb_node_connections{job=\"yugabytedb-tserver\"}",
-                "legendFormat": "{{namespace}} connections"
-              }
-            ],
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
-          }
-        ],
-        "time": {"from": "now-1h", "to": "now"},
-        "refresh": "5s"
-      }
-    }
-
----
-# Grafana Admin Secret
-apiVersion: v1
-kind: Secret
-metadata:
-  name: grafana-admin-secret
-  namespace: monitoring
-type: Opaque
-stringData:
-  admin-user: admin
-  # admin-password will be generated by deployment script
-  # DO NOT hardcode passwords here
-
----
-# Grafana Deployment
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: grafana
-  namespace: monitoring
-spec:
-  replicas: 1
   selector:
     matchLabels:
-      app: grafana
-  template:
-    metadata:
-      labels:
-        app: grafana
-    spec:
-      containers:
-      - name: grafana
-        image: grafana/grafana:10.2.2
-        ports:
-        - containerPort: 3000
-        env:
-        - name: GF_SECURITY_ADMIN_USER
-          valueFrom:
-            secretKeyRef:
-              name: grafana-admin-secret
-              key: admin-user
-        - name: GF_SECURITY_ADMIN_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: grafana-admin-secret
-              key: admin-password
-        - name: GF_INSTALL_PLUGINS
-          value: "grafana-piechart-panel"
-        - name: GF_SECURITY_DISABLE_INITIAL_ADMIN_CREATION
-          value: "false"
-        - name: GF_SECURITY_ADMIN_PASSWORD_POLICY
-          value: "true"
-        volumeMounts:
-        - name: grafana-storage
-          mountPath: /var/lib/grafana
-        - name: grafana-dashboards
-          mountPath: /etc/grafana/provisioning/dashboards
-        securityContext:
-          runAsNonRoot: true
-          runAsUser: 472
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - ALL
-      volumes:
-      - name: grafana-storage
-        emptyDir: {}
-      - name: grafana-dashboards
-        configMap:
-          name: grafana-dashboards
+      app: yb-tserver
+  namespaceSelector:
+    matchNames:
+    - yb-prod
+    - yb-staging
+    - yb-dev  
+  endpoints:
+  - port: http-ysql-met
+    interval: 15s
+    path: /prometheus-metrics
+  - port: http-ycql-met
+    interval: 15s
+    path: /prometheus-metrics
 
 ---
-# Grafana Service
-apiVersion: v1
-kind: Service
+# Redpanda ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
 metadata:
-  name: grafana
+  name: redpanda-monitoring
   namespace: monitoring
+  labels:
+    app: redpanda
+    release: kube-prometheus-stack
 spec:
   selector:
-    app: grafana
-  ports:
-  - port: 3000
-    targetPort: 3000
-  type: ClusterIP 
+    matchLabels:
+      app.kubernetes.io/name: redpanda
+  namespaceSelector:
+    matchNames:
+    - kafka
+  endpoints:
+  - port: prometheus
+    interval: 15s
+    path: /metrics 

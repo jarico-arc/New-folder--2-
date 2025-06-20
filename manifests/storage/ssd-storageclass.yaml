@@ -1,0 +1,45 @@
+# Regional SSD StorageClass for YugabyteDB Production
+# Provides multi-zone replication with WaitForFirstConsumer
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pd-ssd-regional
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Regional SSD storage for production YugabyteDB workloads"
+provisioner: pd.csi.storage.gke.io # GKE CSI driver
+parameters:
+  type: pd-ssd
+  replication-type: regional-pd  # Cross-zone replication
+  encryption-key: projects/PROJECT_ID/locations/LOCATION/keyRings/RING_NAME/cryptoKeys/KEY_NAME # CMEK
+volumeBindingMode: WaitForFirstConsumer  # Critical for multi-zone
+allowVolumeExpansion: true
+reclaimPolicy: Retain  # Prevent accidental data loss in production
+
+---
+# Zone-specific SSD StorageClass for development/staging
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pd-ssd
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+parameters:
+  type: pd-ssd
+provisioner: kubernetes.io/gce-pd
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+
+---
+# Standard StorageClass for non-critical workloads
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pd-standard
+parameters:
+  type: pd-standard
+provisioner: kubernetes.io/gce-pd
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+reclaimPolicy: Delete 
