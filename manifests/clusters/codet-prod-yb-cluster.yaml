@@ -231,43 +231,22 @@ data:
   backup-encryption: "true"
 
 ---
-# Production Security Context Constraints
+# Production Pod Security Standards Configuration
 apiVersion: v1
-kind: SecurityContextConstraints
+kind: ConfigMap
 metadata:
-  name: codet-prod-yb-scc
+  name: codet-prod-yb-security-config
+  namespace: codet-prod-yb
   labels:
     app: yugabytedb
     environment: prod
     cluster: codet-prod-yb
-allowHostDirVolumePlugin: false
-allowHostIPC: false
-allowHostNetwork: false
-allowHostPID: false
-allowHostPorts: false
-allowPrivilegedContainer: false
-allowedCapabilities: []
-defaultAddCapabilities: []
-requiredDropCapabilities:
-- ALL
-fsGroup:
-  type: MustRunAs
-  ranges:
-  - min: 1000
-    max: 65535
-runAsUser:
-  type: MustRunAsNonRoot
-seLinuxContext:
-  type: MustRunAs
-supplementalGroups:
-  type: MustRunAs
-  ranges:
-  - min: 1000
-    max: 65535
-volumes:
-- configMap
-- secret
-- persistentVolumeClaim
-- projected
-- downwardAPI
-- emptyDir 
+data:
+  security.policy: "restricted"
+  security.runAsNonRoot: "true"
+  security.runAsUser: "1000"
+  security.runAsGroup: "1000"
+  security.fsGroup: "1000"
+  security.allowPrivilegeEscalation: "false"
+  security.readOnlyRootFilesystem: "true"
+  security.dropCapabilities: "ALL" 

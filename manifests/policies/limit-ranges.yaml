@@ -86,12 +86,12 @@ spec:
       storage: 50Gi
 
 ---
-# Operator Namespace Limit Range
+# Monitoring Namespace Limit Range
 apiVersion: v1
 kind: LimitRange
 metadata:
-  name: operator-limit-range
-  namespace: codet-prod-yb  # FIXED: Updated from operator namespace
+  name: monitoring-limit-range
+  namespace: monitoring
 spec:
   limits:
   - type: Container

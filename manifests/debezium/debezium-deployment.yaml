@@ -170,12 +170,10 @@ data:
       "name": "yugabytedb-multi-zone-connector",
       "config": {
         "connector.class": "io.debezium.connector.yugabytedb.YugabyteDBConnector",
-        # FIXED: Updated database hostnames to current namespace structure  
         "database.hostname": "yb-tserver-0.yb-tservers.codet-dev-yb.svc.cluster.local,yb-tserver-0.yb-tservers.codet-staging-yb.svc.cluster.local,yb-tserver-0.yb-tservers.codet-prod-yb.svc.cluster.local",
         "database.port": "5433",
         "database.user": "yugabyte",
-                        # SECURITY: Password moved to secret - DO NOT USE PLAINTEXT
-                "database.password": "${DATABASE_PASSWORD}",
+        "database.password": "${DATABASE_PASSWORD}",
         "database.dbname": "yugabyte",
         "database.server.name": "yugabytedb-multizone",
         "table.include.list": "public.customers,public.orders,public.products",

@@ -99,17 +99,15 @@ spec:
       port: 9100  # TServer RPC
     - protocol: TCP
       port: 6379  # Redis API
-  # Allow application access to YSQL/YCQL (only from API gateway)
+  # Allow application access to YSQL/YCQL (only from same namespace initially)
   - from:
-    - namespaceSelector:
-        matchLabels:
-          name: api-gateway
+    - podSelector: {}
     ports:
     - protocol: TCP
       port: 5433  # YSQL
     - protocol: TCP
       port: 9042  # YCQL
-  # Allow CDC/Debezium access
+  # Allow CDC/Debezium access from kafka namespace
   - from:
     - namespaceSelector:
         matchLabels:
@@ -173,7 +171,7 @@ spec:
   - to:
     - namespaceSelector:
         matchLabels:
-          name: codet-prod-yb  # FIXED: Updated namespace
+          name: codet-prod-yb
       podSelector:
         matchLabels:
           app: yb-tserver
@@ -184,7 +182,7 @@ spec:
   - to:
     - namespaceSelector:
         matchLabels:
-          name: codet-prod-yb  # FIXED: Updated namespace
+          name: codet-prod-yb
       podSelector:
         matchLabels:
           app: yb-master
@@ -248,14 +246,6 @@ spec:
     ports:
     - protocol: TCP
       port: 9644  # Metrics
-  # Allow API gateway for consumer APIs
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          name: api-gateway
-    ports:
-    - protocol: TCP
-      port: 9092
   egress:
   # Allow broker-to-broker
   - to:
@@ -276,12 +266,12 @@ spec:
       port: 53
 
 ---
-# Block direct database access (enforce API-only access)
+# Block direct database access (enforce controlled access)
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: block-direct-db-access
-  namespace: codet-prod-yb  # FIXED: Updated to current namespace structure
+  namespace: codet-prod-yb
 spec:
   podSelector:
     matchLabels:
@@ -289,17 +279,7 @@ spec:
   policyTypes:
   - Ingress
   ingress:
-  # Explicitly deny all database access except from allowed sources
-  # (API gateway and CDC connector)
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          name: api-gateway
-    ports:
-    - protocol: TCP
-      port: 5433
-    - protocol: TCP
-      port: 9042
+  # Allow CDC connector access
   - from:
     - namespaceSelector:
         matchLabels:
@@ -310,7 +290,6 @@ spec:
     ports:
     - protocol: TCP
       port: 5433
-  # All other database access is implicitly denied
 
 ---
 # Allow monitoring namespace to scrape all metrics

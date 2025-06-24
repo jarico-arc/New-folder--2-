@@ -7,7 +7,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: dev-resource-quota
-  namespace: codet-dev-yb  # FIXED
+  namespace: codet-dev-yb
 spec:
   hard:
     # Compute resources
@@ -32,7 +32,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: staging-resource-quota
-  namespace: codet-staging-yb  # FIXED
+  namespace: codet-staging-yb
 spec:
   hard:
     # Compute resources
@@ -57,7 +57,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: prod-zone-a-quota
-  namespace: codet-dev-yb    # FIXED
+  namespace: codet-prod-yb
 spec:
   hard:
     # Compute resources (per zone)
@@ -82,7 +82,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: prod-zone-b-quota
-  namespace: codet-staging-yb  # FIXED
+  namespace: codet-prod-yb
 spec:
   hard:
     # Compute resources (per zone)
@@ -107,7 +107,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: prod-zone-c-quota
-  namespace: codet-prod-yb   # FIXED
+  namespace: codet-prod-yb
 spec:
   hard:
     # Compute resources (per zone)

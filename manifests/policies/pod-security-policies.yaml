@@ -2,31 +2,33 @@
 # Implements restricted security policies following Kubernetes Pod Security Standards
 
 ---
-# Restricted Pod Security Standard for Production
+# Development environment namespace
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: codet-dev-yb  # FIXED: Updated from demo namespace
+  name: codet-dev-yb
   labels:
     pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 
 ---
+# Staging environment namespace
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: codet-staging-yb  # FIXED: Updated from demo namespace
+  name: codet-staging-yb
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 
 ---
+# Production environment namespace
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: codet-prod-yb  # FIXED: Updated from demo namespace
+  name: codet-prod-yb
   labels:
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
@@ -55,24 +57,13 @@ metadata:
     pod-security.kubernetes.io/warn: restricted
 
 ---
-# Restricted security for monitoring
+# Monitoring namespace security
 apiVersion: v1
 kind: Namespace
 metadata:
   name: monitoring
   labels:
     pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/warn: restricted
-
----
-# Baseline for Kafka (needs some privileges for persistence)
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kafka
-  labels:
-    pod-security.kubernetes.io/enforce: baseline
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 
@@ -109,12 +100,12 @@ volumes:
 - secret
 
 ---
-# Pod Disruption Budget for High Availability
+# Pod Disruption Budget for Development Master
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: yb-master-pdb
-  namespace: codet-dev-yb    # FIXED: Updated namespace
+  namespace: codet-dev-yb
 spec:
   maxUnavailable: 1
   selector:
@@ -122,11 +113,12 @@ spec:
       app: yb-master
 
 ---
+# Pod Disruption Budget for Development TServer
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: yb-tserver-pdb
-  namespace: codet-dev-yb    # FIXED: Updated namespace
+  namespace: codet-dev-yb
 spec:
   maxUnavailable: 1
   selector:
@@ -134,11 +126,12 @@ spec:
       app: yb-tserver
 
 ---
+# Pod Disruption Budget for Staging Master
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: yb-master-pdb
-  namespace: codet-staging-yb  # FIXED: Updated namespace
+  namespace: codet-staging-yb
 spec:
   maxUnavailable: 1
   selector:
@@ -146,11 +139,12 @@ spec:
       app: yb-master
 
 ---
+# Pod Disruption Budget for Staging TServer
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: yb-tserver-pdb
-  namespace: codet-staging-yb  # FIXED: Updated namespace
+  namespace: codet-staging-yb
 spec:
   maxUnavailable: 1
   selector:
@@ -158,11 +152,12 @@ spec:
       app: yb-tserver
 
 ---
+# Pod Disruption Budget for Production Master
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: yb-master-pdb
-  namespace: codet-prod-yb   # FIXED: Updated namespace
+  namespace: codet-prod-yb
 spec:
   maxUnavailable: 1
   selector:
@@ -170,11 +165,12 @@ spec:
       app: yb-master
 
 ---
+# Pod Disruption Budget for Production TServer
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: yb-tserver-pdb
-  namespace: codet-prod-yb   # FIXED: Updated namespace
+  namespace: codet-prod-yb
 spec:
   maxUnavailable: 1
   selector:

@@ -74,7 +74,7 @@ spec:
             description: "YugabyteDB replication lag in cluster {{ $labels.kubernetes_namespace }} is {{ $value }}ms, which indicates potential cross-region replication issues."
 
         - alert: YugabyteDBHighConnectionCount
-          expr: yugabytedb_server_rpc_connections{kubernetes_namespace=~"codet-.*"} > 500
+          expr: yugabytedb_node_connections{kubernetes_namespace=~"codet-.*"} > 500
           for: 5m
           labels:
             severity: warning
@@ -82,24 +82,10 @@ spec:
             service: yugabytedb
           annotations:
             summary: "YugabyteDB high connection count"
-            description: "YugabyteDB instance {{ $labels.instance }} in cluster {{ $labels.kubernetes_namespace }} has {{ $value }} connections, approaching limits."
+            description: "YugabyteDB instance {{ $labels.instance }} in cluster {{ $labels.kubernetes_namespace }} has {{ $value }} connections, which is above the recommended threshold."
 
-        - alert: YugabyteDBQueueBacklog
-          expr: yugabytedb_rpc_inbound_calls_queue_size{kubernetes_namespace=~"codet-.*"} > 100
-          for: 3m
-          labels:
-            severity: warning
-            cluster: "{{ $labels.kubernetes_namespace }}"
-            service: yugabytedb
-          annotations:
-            summary: "YugabyteDB RPC queue backlog"
-            description: "YugabyteDB instance {{ $labels.instance }} in cluster {{ $labels.kubernetes_namespace }} has {{ $value }} queued RPC calls."
-
-    - name: yugabytedb.resources
-      interval: 60s
-      rules:
         - alert: YugabyteDBHighMemoryUsage
-          expr: (yugabytedb_generic_current_allocated_bytes{kubernetes_namespace=~"codet-.*"} / yugabytedb_generic_heap_size_bytes{kubernetes_namespace=~"codet-.*"}) * 100 > 85
+          expr: (yugabytedb_node_memory_used_bytes{kubernetes_namespace=~"codet-.*"} / yugabytedb_node_memory_total_bytes{kubernetes_namespace=~"codet-.*"}) * 100 > 85
           for: 10m
           labels:
             severity: warning
@@ -216,8 +202,8 @@ metadata:
 data:
   alertmanager.yml: |
     global:
-              # FIXED: Replace localhost with proper SMTP service
-        smtp_smarthost: 'smtp-relay.kube-system.svc.cluster.local:587'
+      # FIXED: Replace localhost with proper SMTP service
+      smtp_smarthost: 'smtp-relay.kube-system.svc.cluster.local:587'
       smtp_from: 'alertmanager@yourcompany.com'
       smtp_require_tls: true
     

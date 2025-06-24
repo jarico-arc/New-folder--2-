@@ -388,3 +388,4 @@ spec:
       annotations:
         summary: "YugabyteDB daily backup is overdue"
         description: "No successful daily backup in the last 24 hours" 
+ 
