@@ -1,0 +1,98 @@
+# Webhook service for AlertManager notifications
+# FIXED: Created to replace localhost webhook dependency
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-service
+  namespace: monitoring
+  labels:
+    app: webhook-receiver
+    component: alerting
+spec:
+  selector:
+    app: webhook-receiver
+  ports:
+  - port: 5001
+    targetPort: 5001
+    protocol: TCP
+    name: webhook
+  type: ClusterIP
+
+---
+# Simple webhook receiver deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-receiver
+  namespace: monitoring
+  labels:
+    app: webhook-receiver
+    component: alerting
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webhook-receiver
+  template:
+    metadata:
+      labels:
+        app: webhook-receiver
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+      - name: webhook-receiver
+        image: nginxinc/nginx-unprivileged:alpine
+        ports:
+        - containerPort: 5001
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: webhook-nginx-config
+
+---
+# Nginx configuration for webhook receiver
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webhook-nginx-config
+  namespace: monitoring
+  labels:
+    app: webhook-receiver
+data:
+  default.conf: |
+    server {
+        listen 5001;
+        server_name _;
+        
+        location /webhook {
+            return 200 '{"status":"received"}';
+            add_header Content-Type application/json;
+            
+            # Log webhook data
+            access_log /var/log/nginx/webhook.log;
+        }
+        
+        location /health {
+            return 200 '{"status":"healthy"}';
+            add_header Content-Type application/json;
+        }
+    } 

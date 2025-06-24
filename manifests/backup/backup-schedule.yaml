@@ -5,7 +5,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: backup-config
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
 data:
   gcs-bucket: "yugabytedb-backups-prod"
   retention-days: "30"
@@ -17,7 +17,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: yugabyte-full-backup
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
 spec:
   schedule: "0 2 * * 0"  # Weekly on Sunday at 2 AM
   jobTemplate:
@@ -36,7 +36,7 @@ spec:
               echo "Starting full backup at $(date)"
               
               # Get master addresses
-              MASTERS=$(kubectl get pods -n yb-prod -l app=yb-master -o jsonpath='{range .items[*]}{.status.podIP}:7100{","}{end}' | sed 's/,$//')
+              MASTERS=$(kubectl get pods -n codet-prod-yb -l app=yb-master -o jsonpath='{range .items[*]}{.status.podIP}:7100{","}{end}' | sed 's/,$//')
               
               # Create snapshot
               SNAPSHOT_ID=$(yb-admin --master_addresses=$MASTERS create_snapshot ysql.yugabyte | grep "Snapshot id:" | awk '{print $3}')
@@ -82,7 +82,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: yugabyte-incremental-backup
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
 spec:
   schedule: "*/15 * * * *"  # Every 15 minutes for RPO compliance
   jobTemplate:
@@ -101,7 +101,7 @@ spec:
               echo "Starting incremental backup at $(date)"
               
               # Get master addresses
-              MASTERS=$(kubectl get pods -n yb-prod -l app=yb-master -o jsonpath='{range .items[*]}{.status.podIP}:7100{","}{end}' | sed 's/,$//')
+              MASTERS=$(kubectl get pods -n codet-prod-yb -l app=yb-master -o jsonpath='{range .items[*]}{.status.podIP}:7100{","}{end}' | sed 's/,$//')
               
               # Create incremental snapshot
               SNAPSHOT_ID=$(yb-admin --master_addresses=$MASTERS create_snapshot ysql.yugabyte | grep "Snapshot id:" | awk '{print $3}')
@@ -141,7 +141,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: yugabyte-backup-cleanup
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
 spec:
   schedule: "0 3 * * *"  # Daily at 3 AM
   jobTemplate:
@@ -187,7 +187,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: yugabyte-backup-sa
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
   annotations:
     iam.gke.io/gcp-service-account: yugabyte-backup-sa@PROJECT_ID.iam.gserviceaccount.com
 
@@ -196,7 +196,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
   name: yugabyte-backup-role
 rules:
 - apiGroups: [""]
@@ -211,11 +211,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: yugabyte-backup-binding
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
 subjects:
 - kind: ServiceAccount
   name: yugabyte-backup-sa
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
 roleRef:
   kind: Role
   name: yugabyte-backup-role
@@ -227,7 +227,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: yugabyte-dr-failover
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated namespace
   labels:
     dr-operation: failover
 spec:
@@ -246,8 +246,8 @@ spec:
           
           # Step 1: Stop production cluster gracefully
           echo "Stopping production cluster..."
-          kubectl scale statefulset yb-master -n yb-prod --replicas=0
-          kubectl scale statefulset yb-tserver -n yb-prod --replicas=0
+          kubectl scale statefulset yb-master -n codet-prod-yb --replicas=0
+          kubectl scale statefulset yb-tserver -n codet-prod-yb --replicas=0
           
           # Step 2: Promote DR cluster
           echo "Promoting DR cluster..."

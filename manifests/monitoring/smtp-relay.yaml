@@ -1,0 +1,101 @@
+# SMTP relay service for AlertManager
+# FIXED: Created to replace localhost SMTP dependency
+apiVersion: v1
+kind: Service
+metadata:
+  name: smtp-relay
+  namespace: kube-system
+  labels:
+    app: smtp-relay
+    component: messaging
+spec:
+  selector:
+    app: smtp-relay
+  ports:
+  - port: 587
+    targetPort: 587
+    protocol: TCP
+    name: smtp
+  type: ClusterIP
+
+---
+# SMTP relay deployment (for development/testing)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smtp-relay
+  namespace: kube-system
+  labels:
+    app: smtp-relay
+    component: messaging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: smtp-relay
+  template:
+    metadata:
+      labels:
+        app: smtp-relay
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      containers:
+      - name: smtp-relay
+        image: tecnativa/postfix-relay:latest
+        env:
+        - name: MAIL_RELAY_HOST
+          value: "smtp.gmail.com"
+        - name: MAIL_RELAY_PORT
+          value: "587"
+        - name: MAIL_RELAY_USER
+          valueFrom:
+            secretKeyRef:
+              name: smtp-credentials
+              key: username
+              optional: true
+        - name: MAIL_RELAY_PASS
+          valueFrom:
+            secretKeyRef:
+              name: smtp-credentials
+              key: password
+              optional: true
+        ports:
+        - containerPort: 587
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # Postfix needs to write logs
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - SETUID
+            - SETGID
+
+---
+# Secret template for SMTP credentials (must be created manually)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: smtp-credentials
+  namespace: kube-system
+  labels:
+    app: smtp-relay
+type: Opaque
+data:
+  # SECURITY: These must be set manually
+  # Create with: kubectl create secret generic smtp-credentials \
+  #   --from-literal=username="your-smtp-username" \
+  #   --from-literal=password="your-smtp-password" \
+  #   --namespace=kube-system
+  username: ""  # Set via external secret management
+  password: ""  # Set via external secret management 

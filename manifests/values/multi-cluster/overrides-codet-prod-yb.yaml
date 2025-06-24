@@ -1,0 +1,392 @@
+# YugabyteDB Multi-Cluster Override File for codet-prod-yb
+# Environment: prod
+# Region: us-east1, Zone: us-east1-b
+
+isMultiAz: true
+AZ: us-east1-b
+
+# Multi-cluster master addresses for all 3 environments
+masterAddresses: "yb-master-0.yb-masters.codet-dev-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-staging-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-prod-yb.svc.cluster.local:7100"
+
+# Storage configuration
+storage:
+  master:
+    storageClass: "ssd-us-east1-b"
+    size: "500Gi"
+  tserver:
+    storageClass: "ssd-us-east1-b"
+    size: "500Gi"
+
+# Replica configuration
+replicas:
+  master: 1
+  tserver: 1
+  totalMasters: 3
+
+# Resource configuration for production
+resource:
+  master:
+    requests:
+      cpu: "2000m"
+      memory: "4Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+  tserver:
+    requests:
+      cpu: "4000m"
+      memory: "8Gi"
+    limits:
+      cpu: "4000m"
+      memory: "8Gi"
+
+# Global flags for multi-cluster setup
+gflags:
+  master:
+    placement_cloud: "gke"
+    placement_region: "us-east1"
+    placement_zone: "us-east1-b"
+    leader_failure_max_missed_heartbeat_periods: 10
+    raft_heartbeat_interval_ms: 1000
+    enable_ysql: true
+    default_memory_limit_to_ram_ratio: 0.85
+    # Multi-cluster specific flags
+    use_private_ip: "cloud"
+    rpc_bind_addresses: "0.0.0.0:7100"
+    server_broadcast_addresses: "0.0.0.0:7000"
+    # Production-specific flags
+    log_min_seconds_to_retain: 172800  # 48 hours
+    max_clock_skew_usec: 500000
+    enable_audit_logging: true
+    audit_log_level: "INFO"
+    # Security flags
+    use_node_to_node_encryption: true
+    use_client_to_server_encryption: true
+    certs_dir: "/opt/certs"
+  tserver:
+    placement_cloud: "gke"
+    placement_region: "us-east1"
+    placement_zone: "us-east1-b"
+    leader_failure_max_missed_heartbeat_periods: 10
+    raft_heartbeat_interval_ms: 1000
+    enable_ysql: true
+    default_memory_limit_to_ram_ratio: 0.85
+    # CDC configuration for multi-cluster
+    cdc_max_stream_intent_records: 20000
+    # Multi-cluster specific flags
+    use_private_ip: "cloud"
+    rpc_bind_addresses: "0.0.0.0:9100"
+    server_broadcast_addresses: "0.0.0.0:9000"
+    pgsql_proxy_bind_address: "0.0.0.0:5433"
+    cql_proxy_bind_address: "0.0.0.0:9042"
+    redis_proxy_bind_address: "0.0.0.0:6379"
+    # Production-specific flags
+    log_min_seconds_to_retain: 172800  # 48 hours
+    max_clock_skew_usec: 500000
+    enable_audit_logging: true
+    audit_log_level: "INFO"
+    # Performance flags
+    rocksdb_compact_flush_rate_limit_bytes_per_sec: 512MB
+    rocksdb_universal_compaction_size_ratio: 8
+    # Security flags
+    use_node_to_node_encryption: true
+    use_client_to_server_encryption: true
+    certs_dir: "/opt/certs"
+
+# Security configuration (maximum for production)
+auth:
+  enabled: true
+  useSecretFile: true
+  rbac:
+    enabled: true
+
+tls:
+  enabled: true
+  nodeToNode: true
+  clientToServer: true
+  certManager:
+    enabled: true
+    issuer: "yugabytedb-ca-issuer"
+  
+# Service configuration with private load balancers
+services:
+  master:
+    type: LoadBalancer
+    annotations:
+      cloud.google.com/load-balancer-type: "Internal"
+      networking.gke.io/load-balancer-type: "Internal"
+      service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+    ui:
+      type: LoadBalancer
+      annotations:
+        cloud.google.com/load-balancer-type: "Internal"
+        networking.gke.io/load-balancer-type: "Internal"
+        # Restrict UI access in production
+        networking.gke.io/load-balancer-subnet: "prod-restricted-subnet"
+  tserver:
+    type: LoadBalancer
+    annotations:
+      cloud.google.com/load-balancer-type: "Internal"
+      networking.gke.io/load-balancer-type: "Internal"
+      service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+
+# Pod configuration with enhanced security
+pod:
+  master:
+    tolerations:
+      - key: "environment"
+        operator: "Equal"
+        value: "prod"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 300
+    nodeSelector:
+      environment: "prod"
+      node-type: "database"
+    annotations:
+      cluster.name: "codet-prod-yb"
+      environment: "prod"
+      backup.schedule: "daily"
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        cpu: "2000m"
+        memory: "4Gi"
+      limits:
+        cpu: "2000m"
+        memory: "4Gi"
+    # Affinity rules for high availability
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - yb-master
+          topologyKey: kubernetes.io/hostname
+  tserver:
+    tolerations:
+      - key: "environment"
+        operator: "Equal"
+        value: "prod"
+        effect: "NoSchedule"
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 300
+    nodeSelector:
+      environment: "prod"
+      node-type: "database"
+    annotations:
+      cluster.name: "codet-prod-yb"
+      environment: "prod"
+      backup.schedule: "daily"
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+      capabilities:
+        drop:
+          - ALL
+    resources:
+      requests:
+        cpu: "4000m"
+        memory: "8Gi"
+      limits:
+        cpu: "4000m"
+        memory: "8Gi"
+    # Affinity rules for high availability
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+            - key: app
+              operator: In
+              values:
+              - yb-tserver
+          topologyKey: kubernetes.io/hostname
+
+# Enhanced network policy for production
+networkPolicy:
+  enabled: true
+  ingress:
+    - from:
+      - namespaceSelector:
+          matchLabels:
+            name: codet-prod-yb
+      ports:
+      - protocol: TCP
+        port: 7000
+      - protocol: TCP
+        port: 7100
+      - protocol: TCP
+        port: 9000
+      - protocol: TCP
+        port: 9100
+      - protocol: TCP
+        port: 5433
+      - protocol: TCP
+        port: 9042
+
+# Monitoring with enhanced security
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  scrapeTimeout: "30s"
+  interval: "30s"
+
+# Production specific settings
+domainName: codet-prod-yb.local
+image:
+  tag: "2.25.2"
+  pullPolicy: "IfNotPresent"
+  
+# Multi-cluster universe configuration
+universeConfig:
+  name: "codet-multi-cluster"
+  placement:
+    numReplicas: 3
+    cloudList:
+      - cloud: "gke"
+        regionList:
+          - region: "us-west1"
+            zones:
+              - zone: "us-west1-b"
+                numNodes: 1
+          - region: "us-central1" 
+            zones:
+              - zone: "us-central1-b"
+                numNodes: 1
+          - region: "us-east1"
+            zones:
+              - zone: "us-east1-b"
+                numNodes: 1
+
+# Production backup configuration
+backups:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention: "30d"
+  location: "gs://codet-prod-yb-backups"
+  encryption:
+    enabled: true
+    key: "projects/YOUR_PROJECT/locations/global/keyRings/yugabytedb/cryptoKeys/backup-key"
+  
+# Persistent volume configuration with enhanced settings
+persistentVolume:
+  master:
+    storageClass: "ssd-us-east1-b"
+    size: "500Gi"
+    annotations:
+      volume.beta.kubernetes.io/storage-class: "ssd-us-east1-b"
+    accessModes:
+      - ReadWriteOnce
+  tserver:
+    storageClass: "ssd-us-east1-b"
+    size: "500Gi"
+    annotations:
+      volume.beta.kubernetes.io/storage-class: "ssd-us-east1-b"
+    accessModes:
+      - ReadWriteOnce
+
+# Health checking configuration
+healthCheck:
+  enabled: true
+  initialDelaySeconds: 90
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+  
+# Performance and reliability settings
+performance:
+  # Production-specific performance settings
+  memtable_flush_size_mb: 512
+  sst_files_soft_limit: 128
+  sst_files_hard_limit: 192
+  rocksdb_compact_flush_rate_limit_bytes_per_sec: 512MB
+  # Enhanced cache settings
+  block_cache_size_mb: 2048
+  row_cache_size_mb: 512
+  
+reliability:
+  # Production-specific reliability settings
+  enable_automatic_tablet_splitting: true
+  tablet_split_size_threshold_bytes: 20GB
+  enable_load_balancing: true
+  load_balancer_max_concurrent_tablet_remote_bootstraps: 10
+  
+# Environment-specific configurations
+environment:
+  name: "prod"
+  cluster: "codet-prod-yb"
+  region: "us-east1"
+  zone: "us-east1-b"
+  
+# Enhanced logging configuration
+logging:
+  level: "INFO"
+  retentionDays: 30
+  auditLog:
+    enabled: true
+    level: "INFO"
+    retentionDays: 90
+  
+# Metrics and observability
+metrics:
+  enabled: true
+  interval: "15s"
+  retention: "30d"
+  exporters:
+    prometheus:
+      enabled: true
+    grafana:
+      enabled: true
+      
+# Production resource quotas
+resourceQuota:
+  enabled: true
+  hard:
+    requests.cpu: "10"
+    requests.memory: "20Gi"
+    limits.cpu: "10"
+    limits.memory: "20Gi"
+    persistentvolumeclaims: "10"
+    
+# Pod disruption budget for high availability
+podDisruptionBudget:
+  master:
+    minAvailable: 1
+  tserver:
+    minAvailable: 1
+    
+# Production-specific limits and requests
+limits:
+  master:
+    cpu: "2000m"
+    memory: "4Gi"
+  tserver:
+    cpu: "4000m"
+    memory: "8Gi"
+    
+requests:
+  master:
+    cpu: "2000m"
+    memory: "4Gi"
+  tserver:
+    cpu: "4000m"
+    memory: "8Gi" 

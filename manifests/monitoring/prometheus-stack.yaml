@@ -1,4 +1,5 @@
 # Comprehensive Prometheus Stack for YugabyteDB Monitoring
+# Security: No hardcoded passwords, secure defaults
 # Includes SLO burn-rate rules and custom dashboards
 
 apiVersion: v1
@@ -8,6 +9,25 @@ metadata:
   labels:
     name: monitoring
     pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Secret for Grafana admin password - MUST be created separately
+apiVersion: v1
+kind: Secret
+metadata:
+  name: grafana-admin-secret
+  namespace: monitoring
+type: Opaque
+data:
+  # SECURITY: Admin password must be generated and set externally
+  # Generate using: make generate-grafana-secret
+  # Or manually: kubectl create secret generic grafana-admin-secret -n monitoring \
+  #   --from-literal=admin-user=admin \
+  #   --from-literal=admin-password="$(openssl rand -base64 32)"
+  admin-user: YWRtaW4=  # admin (base64)
+  admin-password: ""  # MUST be set via external secret management - DO NOT COMMIT
 
 ---
 apiVersion: argoproj.io/v1alpha1
@@ -15,6 +35,8 @@ kind: Application
 metadata:
   name: kube-prometheus-stack
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   destination:
     namespace: monitoring
@@ -26,24 +48,23 @@ spec:
     targetRevision: "57.2.0"
     helm:
       values: |
-        # Global configuration
+        # Global configuration with security hardening
         global:
           rbac:
             createAggregateClusterRoles: false
+          imagePullSecrets: []
         
-        # Prometheus configuration
+        # Prometheus configuration with enhanced security
         prometheus:
           prometheusSpec:
             retention: 30d
             retentionSize: "100GiB"
-            storageSpec:
-              volumeClaimTemplate:
-                spec:
-                  storageClassName: pd-ssd-regional
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 200Gi
+            # Security: Non-root container
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 65534
+              fsGroup: 65534
+            # Resource management
             resources:
               requests:
                 cpu: "2"
@@ -51,18 +72,33 @@ spec:
               limits:
                 cpu: "4"
                 memory: 16Gi
-            # Service monitors for YugabyteDB
+            # Persistent storage configuration
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: ssd-monitoring
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 200Gi
+            # Service discovery configuration
             serviceMonitorSelectorNilUsesHelmValues: false
             serviceMonitorSelector: {}
             podMonitorSelectorNilUsesHelmValues: false
             podMonitorSelector: {}
-            # Additional scrape configs for YugabyteDB
+            ruleSelectorNilUsesHelmValues: false
+            ruleSelector: {}
+            
+            # Enhanced scrape configs for YugabyteDB multi-cluster
             additionalScrapeConfigs:
-              - job_name: 'yugabyte-master'
+              - job_name: 'yugabyte-master-helm'
+                scrape_interval: 30s
+                scrape_timeout: 10s
+                metrics_path: /prometheus-metrics
                 kubernetes_sd_configs:
                   - role: pod
                     namespaces:
-                      names: ['yb-prod', 'yb-staging', 'yb-dev']
+                      names: ['codet-dev-yb', 'codet-staging-yb', 'codet-prod-yb']
                 relabel_configs:
                   - source_labels: [__meta_kubernetes_pod_label_app]
                     action: keep
@@ -70,16 +106,26 @@ spec:
                   - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
                     action: keep
                     regex: true
-                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+                  - source_labels: [__meta_kubernetes_pod_ip]
                     action: replace
                     target_label: __address__
                     regex: (.+)
-                    replacement: ${1}:9300
-              - job_name: 'yugabyte-tserver'
+                    replacement: ${1}:7000
+                  - source_labels: [__meta_kubernetes_namespace]
+                    action: replace
+                    target_label: kubernetes_namespace
+                  - source_labels: [__meta_kubernetes_pod_name]
+                    action: replace
+                    target_label: kubernetes_pod_name
+                    
+              - job_name: 'yugabyte-tserver-helm'
+                scrape_interval: 30s
+                scrape_timeout: 10s
+                metrics_path: /prometheus-metrics
                 kubernetes_sd_configs:
                   - role: pod
                     namespaces:
-                      names: ['yb-prod', 'yb-staging', 'yb-dev']
+                      names: ['codet-dev-yb', 'codet-staging-yb', 'codet-prod-yb']
                 relabel_configs:
                   - source_labels: [__meta_kubernetes_pod_label_app]
                     action: keep
@@ -87,15 +133,33 @@ spec:
                   - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
                     action: keep
                     regex: true
-                  - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+                  - source_labels: [__meta_kubernetes_pod_ip]
                     action: replace
                     target_label: __address__
                     regex: (.+)
                     replacement: ${1}:9000
+                  - source_labels: [__meta_kubernetes_namespace]
+                    action: replace
+                    target_label: kubernetes_namespace
+                  - source_labels: [__meta_kubernetes_pod_name]
+                    action: replace
+                    target_label: kubernetes_pod_name
         
-        # Grafana configuration
+        # Grafana configuration with security improvements
         grafana:
-          adminPassword: "admin123!"  # Change in production
+          # Security: Use external secret for admin password
+          admin:
+            existingSecret: grafana-admin-secret
+            userKey: admin-user
+            passwordKey: admin-password
+          
+          # Security context
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 472
+            fsGroup: 472
+          
+          # Resource management
           resources:
             requests:
               cpu: 500m
@@ -103,11 +167,32 @@ spec:
             limits:
               cpu: "1"
               memory: 2Gi
+          
+          # Persistent storage
           persistence:
             enabled: true
-            storageClassName: pd-ssd-regional
+            storageClassName: ssd-monitoring
             size: 10Gi
-          # Custom dashboards for YugabyteDB
+            accessModes:
+              - ReadWriteOnce
+          
+          # Security: Disable anonymous access
+          grafana.ini:
+            security:
+              disable_initial_admin_creation: false
+              admin_user: admin
+              cookie_secure: true
+              cookie_samesite: strict
+            auth.anonymous:
+              enabled: false
+            auth:
+              disable_login_form: false
+            server:
+              protocol: http
+              enforce_domain: false
+              root_url: ""
+          
+          # Pre-configured dashboards for YugabyteDB
           dashboardProviders:
             dashboardproviders.yaml:
               apiVersion: 1
@@ -118,8 +203,10 @@ spec:
                 type: file
                 disableDeletion: false
                 editable: true
+                updateIntervalSeconds: 30
                 options:
                   path: /var/lib/grafana/dashboards/yugabyte
+          
           dashboards:
             yugabyte:
               yugabyte-overview:
@@ -130,24 +217,30 @@ spec:
                 gnetId: 12621  
                 revision: 1
                 datasource: Prometheus
-          # Pre-configured data sources
+              kubernetes-cluster:
+                gnetId: 7249
+                revision: 1
+                datasource: Prometheus
+          
+          # Data sources with secure configuration
           additionalDataSources:
             - name: Prometheus
               type: prometheus
               url: http://kube-prometheus-stack-prometheus:9090
+              access: proxy
               isDefault: true
+              editable: false
         
-        # AlertManager configuration
+        # AlertManager configuration with enhanced security
         alertmanager:
           alertmanagerSpec:
-            storage:
-              volumeClaimTemplate:
-                spec:
-                  storageClassName: pd-ssd-regional
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 10Gi
+            # Security context
+            securityContext:
+              runAsNonRoot: true
+              runAsUser: 65534
+              fsGroup: 65534
+            
+            # Resource management
             resources:
               requests:
                 cpu: 100m
@@ -155,41 +248,76 @@ spec:
               limits:
                 cpu: 500m
                 memory: 512Mi
+            
+            # Persistent storage
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: ssd-monitoring
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 10Gi
+          
+          # AlertManager configuration - externalize sensitive data
           config:
             global:
-              smtp_smarthost: 'localhost:587'
-              smtp_from: 'alertmanager@company.com'
+              # FIXED: Replace localhost with proper SMTP service
+              smtp_smarthost: 'smtp-relay.kube-system.svc.cluster.local:587'
+              smtp_from: 'alertmanager@codet.com'
+              smtp_require_tls: true
             route:
-              group_by: ['alertname', 'cluster', 'service']
+              group_by: ['alertname', 'cluster', 'service', 'severity']
               group_wait: 10s
               group_interval: 10s
               repeat_interval: 1h
-              receiver: 'web.hook'
+              receiver: 'default-receiver'
               routes:
               - match:
                   severity: critical
-                receiver: 'pager'
+                receiver: 'pager-critical'
+                group_wait: 0s
+                repeat_interval: 5m
               - match:
                   severity: warning
-                receiver: 'slack'
+                receiver: 'slack-warnings'
+                repeat_interval: 12h
             receivers:
-            - name: 'web.hook'
+            - name: 'default-receiver'
               webhook_configs:
-              - url: 'http://localhost:5001/webhook'
-            - name: 'pager'
+              # FIXED: Replace localhost with proper webhook service
+              - url: 'http://webhook-service.monitoring.svc.cluster.local:5001/webhook'
+                send_resolved: true
+            - name: 'pager-critical'
+              # Configure with your PagerDuty integration key
               webhook_configs:
               - url: 'https://events.pagerduty.com/v2/enqueue'
+                send_resolved: true
                 http_config:
-                  bearer_token: 'your-pagerduty-key'
-            - name: 'slack'
+                  bearer_token_file: /etc/alertmanager/secrets/pagerduty-key
+            - name: 'slack-warnings'
+              # Configure with your Slack webhook URL
               slack_configs:
-              - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+              - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
                 channel: '#alerts'
-                title: 'YugabyteDB Alert'
+                title: 'YugabyteDB Alert - {{ .GroupLabels.alertname }}'
                 text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+                send_resolved: true
+
+        # Node Exporter with security hardening
+        nodeExporter:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+        
+        # Kube State Metrics with security hardening
+        kubeStateMetrics:
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
 
 ---
-# Custom ServiceMonitor for YugabyteDB
+# Custom ServiceMonitor for YugabyteDB with enhanced configuration
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -201,19 +329,110 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: yb-master
+      app: yugabytedb
   namespaceSelector:
     matchNames:
-    - yb-prod
-    - yb-staging
-    - yb-dev
+    # FIXED: Updated to current namespace structure
+    - codet-dev-yb
+    - codet-staging-yb  
+    - codet-prod-yb
   endpoints:
   - port: http-ui
-    interval: 15s
     path: /prometheus-metrics
+    interval: 30s
+    scrapeTimeout: 10s
   - port: http-ycql-met
-    interval: 15s
     path: /prometheus-metrics
+    interval: 30s
+    scrapeTimeout: 10s
+
+---
+# PrometheusRule for YugabyteDB SLOs
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: yugabytedb-slos
+  namespace: monitoring
+  labels:
+    app: yugabytedb
+    release: kube-prometheus-stack
+spec:
+  groups:
+  - name: yugabytedb.slos
+    interval: 30s
+    rules:
+    - alert: YugabyteDBHighLatency
+      expr: histogram_quantile(0.99, rate(rpc_latency_bucket[5m])) > 100
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "YugabyteDB high latency detected"
+        description: "99th percentile latency is {{ $value }}ms"
+    
+    - alert: YugabyteDBNodeDown
+      expr: up{job=~"yugabyte-.*"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "YugabyteDB node is down"
+        description: "Node {{ $labels.instance }} has been down for more than 1 minute"
+    
+    - alert: YugabyteDBReplicationLag
+      expr: max(tablet_consensus_log_reader_bytes_behind) > 1048576
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "YugabyteDB replication lag detected"
+        description: "Replication lag is {{ $value }} bytes"
+
+---
+# NetworkPolicy to secure monitoring namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: monitoring-network-policy
+  namespace: monitoring
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow incoming connections from ingress controllers
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 3000  # Grafana
+  # Allow internal monitoring communication
+  - from:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 9090  # Prometheus
+    - protocol: TCP
+      port: 3000  # Grafana
+    - protocol: TCP
+      port: 9093  # AlertManager
+  egress:
+  # Allow outgoing connections to monitored services
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 7000  # YugabyteDB Master
+    - protocol: TCP
+      port: 9000  # YugabyteDB TServer
+    - protocol: TCP
+      port: 443   # HTTPS
+    - protocol: TCP
+      port: 80    # HTTP
+    - protocol: UDP
+      port: 53    # DNS
 
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -230,9 +449,10 @@ spec:
       app: yb-tserver
   namespaceSelector:
     matchNames:
-    - yb-prod
-    - yb-staging
-    - yb-dev  
+    # FIXED: Updated to current namespace structure
+    - codet-prod-yb
+    - codet-staging-yb
+    - codet-dev-yb  
   endpoints:
   - port: http-ysql-met
     interval: 15s

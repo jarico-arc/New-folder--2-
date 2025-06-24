@@ -5,7 +5,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: default-deny-all
-  namespace: yb-prod
+  namespace: codet-prod-yb
 spec:
   podSelector: {}
   policyTypes:
@@ -17,7 +17,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-yugabyte-cluster-internal
-  namespace: yb-prod
+  namespace: codet-prod-yb
 spec:
   podSelector:
     matchLabels:
@@ -80,7 +80,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: allow-yugabyte-tserver-traffic
-  namespace: yb-prod
+  namespace: codet-prod-yb
 spec:
   podSelector:
     matchLabels:
@@ -173,7 +173,7 @@ spec:
   - to:
     - namespaceSelector:
         matchLabels:
-          name: yb-prod
+          name: codet-prod-yb  # FIXED: Updated namespace
       podSelector:
         matchLabels:
           app: yb-tserver
@@ -184,7 +184,7 @@ spec:
   - to:
     - namespaceSelector:
         matchLabels:
-          name: yb-prod
+          name: codet-prod-yb  # FIXED: Updated namespace
       podSelector:
         matchLabels:
           app: yb-master
@@ -281,7 +281,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: block-direct-db-access
-  namespace: yb-prod
+  namespace: codet-prod-yb  # FIXED: Updated to current namespace structure
 spec:
   podSelector:
     matchLabels:

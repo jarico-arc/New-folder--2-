@@ -1,0 +1,203 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '18'
+
+jobs:
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8 black bandit safety
+          pip install -r cloud-functions/bi-consumer/requirements.txt
+      
+      - name: Run Black (Code Formatting)
+        run: black --check --diff cloud-functions/
+      
+      - name: Run Flake8 (Linting)
+        run: flake8 cloud-functions/ --count --statistics
+      
+      - name: Lint YAML files
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          config_file: .yamllint.yml
+          file_or_dir: manifests/
+          strict: true
+
+  security:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit safety pip-audit
+          pip install -r cloud-functions/bi-consumer/requirements.txt
+      
+      - name: Run Bandit (Security Linting)
+        run: |
+          bandit -r cloud-functions/ -f json -o bandit-report.json || true
+          bandit -r cloud-functions/ -ll
+      
+      - name: Run Safety (Dependency Vulnerability Check)
+        run: |
+          safety check --json --output safety-report.json || true
+          safety check
+      
+      - name: Run pip-audit (Advanced Vulnerability Check)
+        run: |
+          pip-audit -r cloud-functions/bi-consumer/requirements.txt --desc --format=json --output=pip-audit-report.json || true
+          pip-audit -r cloud-functions/bi-consumer/requirements.txt --desc
+      
+      - name: Upload security reports
+        uses: actions/upload-artifact@v3
+        with:
+          name: security-reports
+          path: |
+            bandit-report.json
+            safety-report.json
+            pip-audit-report.json
+
+  validate-kubernetes:
+    name: Validate Kubernetes Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+      
+      - name: Validate YAML syntax
+        run: |
+          find manifests/ -name "*.yaml" -o -name "*.yml" | while read -r file; do
+            echo "Validating $file"
+            kubectl --dry-run=client --validate=true apply -f "$file" || exit 1
+          done
+      
+      - name: Install kubeval
+        run: |
+          wget https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz
+          tar xf kubeval-linux-amd64.tar.gz
+          sudo mv kubeval /usr/local/bin
+      
+      - name: Validate with kubeval
+        run: |
+          find manifests/ -name "*.yaml" -o -name "*.yml" | while read -r file; do
+            echo "Validating $file with kubeval"
+            kubeval "$file" || exit 1
+          done
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r cloud-functions/bi-consumer/requirements.txt
+      
+      - name: Run unit tests
+        run: |
+          cd cloud-functions/bi-consumer
+          python -m pytest tests/ -v --cov=main --cov-report=xml --cov-report=html
+      
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./cloud-functions/bi-consumer/coverage.xml
+          fail_ci_if_error: false
+
+  helm-lint:
+    name: Helm Chart Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+      
+      - name: Add Helm repositories
+        run: |
+          helm repo add yugabytedb https://charts.yugabyte.com
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+      
+      - name: Lint Helm values
+        run: |
+          # Test YugabyteDB multi-cluster values files
+          helm lint --values manifests/values/multi-cluster/overrides-codet-dev-yb.yaml yugabytedb/yugabyte || true
+          helm lint --values manifests/values/multi-cluster/overrides-codet-staging-yb.yaml yugabytedb/yugabyte || true
+          helm lint --values manifests/values/multi-cluster/overrides-codet-prod-yb.yaml yugabytedb/yugabyte || true
+
+  docker-security:
+    name: Docker Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: './cloud-functions'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+      
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  infrastructure-scan:
+    name: Infrastructure Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: manifests/
+          framework: kubernetes
+          output_format: sarif
+          output_file_path: reports/checkov-results.sarif
+      
+      - name: Upload Checkov scan results
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: reports/checkov-results.sarif 

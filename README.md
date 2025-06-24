@@ -1,67 +1,366 @@
-# YugabyteDB v2 Production Deployment
+# YugabyteDB Multi-Cluster Kubernetes Deployment
 
-**Production-ready YugabyteDB cluster on GKE with enterprise-grade reliability and event-driven architecture.**
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-1.28+-blue.svg)](https://kubernetes.io/)
+[![YugabyteDB](https://img.shields.io/badge/YugabyteDB-2.25.2-green.svg)](https://yugabyte.com/)
 
-## 🎯 Objective
+Enterprise-grade multi-cluster YugabyteDB deployment on Google Kubernetes Engine (GKE) with private networking, comprehensive security, and professional DevOps practices.
 
-Deploy multi-zone YugabyteDB cluster with:
-- **Zero direct database access** (API/event-driven only)
-- **Regional fault tolerance** (3-zone deployment)
-- **Marketing BigQuery integration**
-- **Production delivery within 1 week**
-- **Budget: $40-100/month**
+## 🏗️ Architecture Overview
 
-## 🚀 Quick Deployment
+This project deploys **3 YugabyteDB clusters** across multiple GCP regions in a multi-cluster configuration:
+
+- **Codet-Dev-YB**: Development cluster in `us-west1-b`
+- **Codet-Staging-YB**: Staging cluster in `us-central1-b`  
+- **Codet-Prod-YB**: Production cluster in `us-east1-b`
+
+### Key Features
+
+✅ **Multi-Cluster Architecture**: 3 clusters with cross-region replication  
+✅ **Private VPC Networking**: No public IPs, internal load balancers only  
+✅ **Enterprise Security**: TLS encryption, RBAC, Pod Security Standards  
+✅ **Automated Backups**: Scheduled backups with encryption  
+✅ **Professional CI/CD**: GitHub Actions, security scanning, testing  
+✅ **Comprehensive Monitoring**: Prometheus, Grafana, alerting  
+✅ **Infrastructure as Code**: Helm charts, Kubernetes manifests  
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- **GCP Project** with billing enabled
+- **Required Tools**: `gcloud`, `kubectl`, `helm`
+- **Permissions**: Kubernetes Engine Admin, Compute Network Admin
+
+### 1. Install Dependencies
 
 ```bash
-# Deploy complete v2 architecture
-./scripts/deploy-production-v2.sh
+# Install all required tools
+make install
+
+# Or install manually
+curl https://get.helm.sh/helm-v3.13.0-linux-amd64.tar.gz | tar -xz
+sudo mv linux-amd64/helm /usr/local/bin/
+
+# Add Helm repositories
+helm repo add yugabytedb https://charts.yugabyte.com
+helm repo update
 ```
 
-## 📋 Architecture Plan
+### 2. Deploy Multi-Cluster Setup
 
-**Complete documentation**: [V2-ARCHITECTURE-PLAN.md](V2-ARCHITECTURE-PLAN.md)
+```bash
+# Complete deployment (all 3 clusters)
+make multi-cluster-deploy
 
-### Key Components
-- **GKE**: Regional cluster (us-central1-a,b,f)
-- **YugabyteDB**: Kubernetes Operator with 3+ nodes
-- **Redpanda**: 3-broker Kafka cluster
-- **Debezium**: CDC connector for event streaming
-- **BigQuery**: Marketing analytics integration
-- **Security**: Network policies enforce API-only access
+# Or step-by-step deployment
+./scripts/create-multi-cluster-yugabytedb.sh vpc        # Create VPC
+./scripts/create-multi-cluster-yugabytedb.sh clusters  # Create clusters
+./scripts/create-multi-cluster-yugabytedb.sh install   # Install YugabyteDB
+```
 
-### Deployment Time
-- **Total**: ~20 minutes
-- **Infrastructure**: 5 min
-- **Database**: 8 min  
-- **Event Pipeline**: 5 min
-- **Integration**: 2 min
+### 3. Validate Deployment
 
-## 📁 Repository Structure
+```bash
+# Test connectivity and functionality
+make multi-cluster-test
+
+# Check status
+make multi-cluster-status
+
+# Show connection information
+make multi-cluster-info
+```
+
+## 📋 Cluster Specifications
+
+| Environment | Region | Nodes | CPU/RAM | Storage | Security | Backup |
+|-------------|--------|-------|---------|---------|----------|---------|
+| **Development** | us-west1 | 1 | 2C/4GB | 100GB SSD | Basic | Disabled |
+| **Staging** | us-central1 | 2 | 3C/6GB | 200GB SSD | Auth + RBAC | Daily |
+| **Production** | us-east1 | 3 | 4C/8GB | 500GB SSD | Full TLS + Audit | Daily + Encrypted |
+
+## 🌐 Network Architecture
+
+### Private VPC Configuration
+- **VPC**: `yugabytedb-private-vpc`
+- **Subnets**: 
+  - Dev: `10.1.0.0/16` (us-west1)
+  - Staging: `10.2.0.0/16` (us-central1)
+  - Production: `10.3.0.0/16` (us-east1)
+
+### Security Features
+- Private GKE clusters (no external IPs)
+- Internal load balancers only
+- Network policies for traffic isolation
+- Firewall rules for YugabyteDB ports only
+- Pod Security Standards enforced
+
+## 🔧 Development Workflow
+
+### Common Operations
+
+```bash
+# Switch between environments
+make context-dev        # Development
+make context-staging    # Staging
+make context-prod       # Production
+
+# Database access
+make ysql-dev          # PostgreSQL-compatible interface
+make ycql-staging      # Cassandra-compatible interface
+
+# Monitoring
+make logs-prod         # View logs
+make multi-cluster-status  # Check health
+```
+
+### Scaling Operations
+
+```bash
+# Scale staging cluster
+make scale-staging
+
+# Scale production cluster  
+make scale-prod
+
+# Manual scaling
+helm upgrade codet-prod-yb yugabytedb/yugabyte \
+  --namespace codet-prod-yb \
+  -f manifests/values/multi-cluster/overrides-codet-prod-yb.yaml \
+  --set replicas.tserver=5
+```
+
+## 🔒 Security Features
+
+### Authentication & Authorization
+- **Development**: Open access for development ease
+- **Staging**: Basic authentication enabled
+- **Production**: Full RBAC + TLS + audit logging
+
+### Network Security
+- Private VPC with no internet access
+- Internal load balancers only
+- Network policies restricting pod-to-pod communication
+- Firewall rules for YugabyteDB ports only
+
+### Secrets Management
+```bash
+# Update production credentials
+kubectl create secret generic codet-prod-yb-credentials \
+  --from-literal=yugabyte.password=NEW_SECURE_PASSWORD \
+  --from-literal=postgres.password=NEW_SECURE_PASSWORD \
+  -n codet-prod-yb \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+## 📊 Monitoring & Observability
+
+### Prometheus Metrics
+All clusters expose metrics for monitoring:
+- Master metrics: `:7000/prometheus-metrics`
+- TServer metrics: `:9000/prometheus-metrics`
+
+### Log Management
+```bash
+# View logs by environment
+make logs-dev
+make logs-staging  
+make logs-prod
+
+# Follow logs in real-time
+kubectl logs -f -n codet-prod-yb yb-master-0
+```
+
+### Health Checks
+```bash
+# Comprehensive health check
+make multi-cluster-status
+
+# Test specific functionality
+./scripts/test-yugabytedb-connectivity.sh connectivity
+./scripts/test-yugabytedb-connectivity.sh multi-cluster
+```
+
+## 💾 Backup & Recovery
+
+### Automated Backups
+- **Staging**: Daily at 3 AM UTC, 7-day retention
+- **Production**: Daily at 2 AM UTC, 30-day retention with encryption
+
+### Manual Backup
+```bash
+# Create snapshot
+kubectl exec -n codet-prod-yb yb-master-0 -- \
+  yb-admin --master_addresses=yb-master-0.yb-masters.codet-prod-yb.svc.cluster.local:7100 \
+  create_snapshot ysql.yugabyte
+
+# List snapshots
+kubectl exec -n codet-prod-yb yb-master-0 -- \
+  yb-admin --master_addresses=yb-master-0.yb-masters.codet-prod-yb.svc.cluster.local:7100 \
+  list_snapshots
+```
+
+### Backup Locations
+- **Staging**: `gs://codet-staging-yb-backups`
+- **Production**: `gs://codet-prod-yb-backups`
+
+## 🛠️ Troubleshooting
+
+### Common Issues
+
+#### Pods Not Starting
+```bash
+# Check pod events
+kubectl describe pod -n codet-dev-yb yb-master-0
+
+# Check resource constraints
+kubectl top nodes
+kubectl top pods -n codet-dev-yb
+```
+
+#### Network Connectivity Issues
+```bash
+# Test internal DNS
+kubectl exec -n codet-dev-yb yb-master-0 -- \
+  nslookup yb-master-0.yb-masters.codet-staging-yb.svc.cluster.local
+
+# Check network policies
+kubectl get networkpolicy -n codet-dev-yb
+```
+
+#### Storage Issues
+```bash
+# Check PVCs
+kubectl get pvc -n codet-dev-yb
+
+# Check storage classes
+kubectl get storageclass
+```
+
+### Recovery Procedures
+
+#### Cluster Recovery
+```bash
+# Restart specific components
+kubectl rollout restart statefulset/yb-master -n codet-dev-yb
+kubectl rollout restart statefulset/yb-tserver -n codet-dev-yb
+
+# Check rollout status
+kubectl rollout status statefulset/yb-master -n codet-dev-yb
+```
+
+## 📂 Project Structure
 
 ```
-├── V2-ARCHITECTURE-PLAN.md     # Complete architecture documentation
+.
 ├── scripts/
-│   ├── deploy-production-v2.sh         # Main deployment script
-│   ├── create-gke-clusters.sh          # Infrastructure setup
-│   └── install-yugabyte-operator.sh    # Operator installation
+│   ├── create-multi-cluster-yugabytedb.sh    # Main deployment script
+│   ├── test-yugabytedb-connectivity.sh       # Connectivity testing
+│   └── security-scan.sh                      # Security scanning
 ├── manifests/
-│   ├── clusters/           # YugabyteDB cluster configs
-│   ├── storage/           # Multi-zone SSD storage
-│   ├── backup/            # Automated backup schedule
-│   ├── redpanda/          # Kafka cluster config
-│   ├── debezium/          # CDC connector
-│   └── policies/          # Network security policies
-└── cloud-functions/
-    └── bi-consumer/       # BigQuery integration
+│   ├── clusters/                              # Cluster configurations
+│   │   ├── codet-dev-yb-cluster.yaml
+│   │   ├── codet-staging-yb-cluster.yaml
+│   │   └── codet-prod-yb-cluster.yaml
+│   ├── values/
+│   │   └── multi-cluster/                     # Helm override files
+│   │       ├── overrides-codet-dev-yb.yaml
+│   │       ├── overrides-codet-staging-yb.yaml
+│   │       └── overrides-codet-prod-yb.yaml
+│   ├── monitoring/                            # Monitoring configs
+│   ├── backup/                                # Backup strategies
+│   └── policies/                              # Security policies
+├── cloud-functions/                           # BI consumer function
+├── .github/workflows/                         # CI/CD pipelines
+├── Makefile                                   # Automation targets
+└── README.md                                  # This file
 ```
 
-## 🔧 Prerequisites
+## 🔧 Configuration Files
 
-- GCP account with billing enabled
-- `gcloud`, `kubectl`, `helm` installed
-- Set GCP project: `gcloud config set project PROJECT_ID`
+### Cluster Configurations
+- `manifests/clusters/`: Kubernetes manifests for each cluster
+- `manifests/values/multi-cluster/`: Helm values for YugabyteDB
+
+### Security Policies
+- `manifests/policies/pod-security-policies.yaml`: Pod security standards
+- `manifests/policies/network-policies-enhanced.yaml`: Network isolation
+- `manifests/policies/resource-quotas.yaml`: Resource limits
+
+### Monitoring
+- `manifests/monitoring/prometheus-stack.yaml`: Complete monitoring setup
+- `manifests/monitoring/alert-rules.yaml`: Custom alerting rules
+
+## 🚀 CI/CD Pipeline
+
+The project includes a comprehensive GitHub Actions pipeline:
+
+- **Linting**: YAML, shell scripts, Python code
+- **Security Scanning**: Container images, Kubernetes manifests, secrets
+- **Testing**: Unit tests, integration tests, connectivity tests
+- **Deployment**: Automated deployment to staging, manual approval for production
+
+## 📈 Performance Optimization
+
+### Resource Allocation
+- **Development**: Minimal resources for cost efficiency
+- **Staging**: Moderate resources for realistic testing
+- **Production**: High-performance configuration with HA
+
+### Storage Optimization
+- Regional SSD persistent disks for production
+- Standard SSD for development and staging
+- Automatic volume expansion enabled
+
+## 🔐 Compliance & Standards
+
+### Security Compliance
+- **CIS Kubernetes Benchmark**: Pod Security Standards
+- **NIST Cybersecurity Framework**: Risk management
+- **SOC 2 Type II**: Data protection controls
+
+### Best Practices
+- Infrastructure as Code (IaC)
+- GitOps deployment methodology
+- Comprehensive monitoring and alerting
+- Automated backup and disaster recovery
+
+## 📚 Documentation
+
+- [Multi-Cluster Deployment Guide](MULTI-CLUSTER-DEPLOYMENT.md): Detailed deployment instructions
+- [Security Documentation](SECURITY.md): Security policies and procedures
+- [Contributing Guidelines](CONTRIBUTING.md): Development workflow
+- [Changelog](CHANGELOG.md): Version history
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Run tests (`make test`)
+4. Run security scan (`make security`)
+5. Commit changes (`git commit -m 'Add amazing feature'`)
+6. Push to branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🆘 Support
+
+- **Documentation**: Check the `docs/` directory for detailed guides
+- **Issues**: Create GitHub issues for bugs or feature requests
+- **Security**: Report security vulnerabilities via security@company.com
+
+## 🎯 Roadmap
+
+- [ ] Multi-region disaster recovery
+- [ ] Automatic failover testing
+- [ ] Advanced monitoring dashboards
+- [ ] Performance benchmarking suite
+- [ ] Cost optimization automation
 
 ---
 
-**Ready for production deployment with single command execution.** 
+**Built with ❤️ for enterprise-grade YugabyteDB deployments** 

@@ -1,104 +1,352 @@
-# YugabyteDB Deployment Project .gitignore
+# DevOps Project .gitignore
+# Professional practices: Exclude sensitive data, build artifacts, and environment-specific files
 
-# Credentials and secrets
-credentials/
+# === SENSITIVE INFORMATION ===
+# Never commit sensitive data
 *.key
 *.pem
 *.p12
 *.pfx
+*.crt
+*.cer
+*.csr
+*.p7b
+*.p7c
+*.p7r
+*.p7s
+*.der
+*.jks
+*.keystore
+secrets/
+.secrets/
+credentials/
+.credentials/
+service-account*.json
+gcp-key*.json
+*-credentials.json
+*-secret.yaml
+*-secrets.yaml
+*-config.yaml
+**/secret-*
+
+# Environment variables
 .env
 .env.local
 .env.production
 .env.staging
-secrets.yml
-secrets.yaml
+.env.development
+.envrc
+.env.*
 
+# === KUBERNETES & DOCKER ===
+# Kubeconfig files
+kubeconfig*
+.kube/config
+*.kubeconfig
+
+# Helm files
+helm-debug/
+.helm/
+*.tgz
+
+# Docker
+.dockerignore
+Dockerfile.prod
+docker-compose.override.yml
+
+# === CLOUD PROVIDERS ===
+# Google Cloud
+.gcloud/
+gcloud-auth.json
+google-cloud-sdk/
+
+# AWS
+.aws/
+aws-cli/
+
+# Azure
+.azure/
+
+# === TERRAFORM & INFRASTRUCTURE ===
 # Terraform
 *.tfstate
 *.tfstate.*
 *.tfvars
+*.tfplan
 .terraform/
 .terraform.lock.hcl
-terraform.tfplan
-terraform.tfstate.backup
+terraform.tfstate.d/
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
-# Kubernetes
-kubeconfig
-*.kubeconfig
-kube-config
+# Pulumi
+Pulumi.*.yaml
+.pulumi/
 
-# Helm
-Chart.lock
-charts/
-
-# Logs
-*.log
-logs/
-*.out
-*.err
-
-# Temporary files
-*.tmp
-*.temp
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-*~
-
-# IDE files
-.vscode/
-.idea/
-*.iml
-*.ipr
-*.iws
-
-# Node.js (if using for any tooling)
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-package-lock.json
-yarn.lock
-
-# Python (if using for any tooling)
+# === LANGUAGE SPECIFIC ===
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-env/
-venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+*.coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
 .venv/
+venv/
+ENV/
+env/
 .env/
 
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-
-# Backup files
-*.backup
-*.bak
-*.orig
-
-# Test outputs
-test-results/
-coverage/
-
-# Local development
-.local/
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+.grunt
+bower_components
+.lock-wscript
+build/Release
+.npm
+.eslintcache
+.node_repl_history
+*.tgz
+.yarn-integrity
 .cache/
 
-# Docker
-.dockerignore
-docker-compose.override.yml
+# Go
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+vendor/
+*.test
+*.out
+go.work
 
+# === OPERATING SYSTEMS ===
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# === DEVELOPMENT TOOLS ===
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.metadata
+*.tmp
+*.bak
+*.swp
+*~.nib
+local.properties
+.settings/
+.loadpath
+.recommenders
+.externalToolBuilders/
+*.launch
+.pydevproject
+.cproject
+.autotools
+.factorypath
+.buildpath
+.target
+.tern-project
+.texlipse
+.springBeans
+.recommenders/
+.apt_generated/
+.cache
+.scala_dependencies
+.worksheet
+
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-rt-v][a-z]
+[._]ss[a-gi-z]
+[._]sw[a-p]
+Session.vim
+Sessionx.vim
+.netrwhist
+tags
+[._]*.un~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+.org-id-locations
+*_archive
+*_flymake.*
+/eshell/history
+/eshell/lastdir
+/elpa/
+*.rel
+
+# === LOGS AND TEMPORARY FILES ===
+logs/
+*.log
+log/
+.log
+temp/
+tmp/
+*.tmp
+*.temp
+
+# === BUILD ARTIFACTS ===
+target/
+build/
+out/
+bin/
+obj/
+
+# === BACKUP FILES ===
+*.bak
+*.backup
+*.old
+*.orig
+
+# === SECURITY SCANNING RESULTS ===
+# Security scan reports
+security-report.json
+vulnerability-report.json
+bandit-report.json
+safety-report.json
+.bandit
+.safety
+
+# === CI/CD ===
+# CI/CD artifacts  
+.github/workflows/secrets/
+.gitlab-ci.local/
+.circleci/config.local.yml
+
+# === MONITORING & ANALYTICS ===
 # Monitoring data
-prometheus_data/
-grafana_data/
-alertmanager_data/ 
+monitoring-data/
+metrics/
+traces/
+
+# === LOCAL DEVELOPMENT ===
+# Local development overrides
+docker-compose.local.yml
+k8s-local/
+local-config/
+.local/
+
+# === PROJECT SPECIFIC ===
+# YugabyteDB specific
+yugabyte-data/
+yb-data/
+*.yb-backup
+
+# Monitoring and metrics
+prometheus-data/
+grafana-data/
+alertmanager-data/
+
+# Scripts output
+script-output/
+deployment-logs/
+cluster-info/
+
+# Testing artifacts
+test-results/
+test-output/
+.pytest_cache/
+coverage/
+
+# Documentation builds
+docs/_build/
+site/
+.mkdocs/
+
+# === SECURITY SCANNING ===
+# Security scan results
+security-scan-results/
+vulnerability-reports/
+.trivyignore
+
+# === COMMENTS FOR TEAM ===
+# Add project-specific ignores below this line
+# Example: my-custom-tool-output/
+
+# End of .gitignore 

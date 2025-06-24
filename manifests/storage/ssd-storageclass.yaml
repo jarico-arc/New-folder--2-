@@ -17,6 +17,24 @@ allowVolumeExpansion: true
 reclaimPolicy: Retain  # Prevent accidental data loss in production
 
 ---
+# YugabyteDB Multi-Zone Storage Class (for Helm deployment)
+# Compatible with yugabytedb/yugabyte Helm chart
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: yb-storage
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "false"
+    description: "Multi-zone SSD storage for YugabyteDB Helm deployments"
+provisioner: kubernetes.io/gce-pd  # Standard GCE provisioner for Helm compatibility
+parameters:
+  type: pd-ssd
+  replication-type: regional-pd  # Cross-zone replication
+volumeBindingMode: WaitForFirstConsumer  # Critical for multi-zone
+allowVolumeExpansion: true
+reclaimPolicy: Retain  # Prevent accidental data loss
+
+---
 # Zone-specific SSD StorageClass for development/staging
 apiVersion: storage.k8s.io/v1
 kind: StorageClass

@@ -91,7 +91,7 @@ apiVersion: v1
 kind: LimitRange
 metadata:
   name: operator-limit-range
-  namespace: yb-operator
+  namespace: codet-prod-yb  # FIXED: Updated from operator namespace
 spec:
   limits:
   - type: Container

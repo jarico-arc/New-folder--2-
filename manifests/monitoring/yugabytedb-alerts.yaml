@@ -1,0 +1,304 @@
+# YugabyteDB Multi-Cluster Alert Rules
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: yugabytedb-multi-cluster-alerts
+  namespace: monitoring
+  labels:
+    app: yugabytedb
+    prometheus: kube-prometheus
+    role: alert-rules
+spec:
+  groups:
+    - name: yugabytedb.cluster.health
+      interval: 30s
+      rules:
+        - alert: YugabyteDBMasterDown
+          expr: up{job="yugabyte-master-helm", kubernetes_namespace=~"codet-.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB Master is down"
+            description: "YugabyteDB Master {{ $labels.instance }} in cluster {{ $labels.kubernetes_namespace }} has been down for more than 2 minutes."
+            runbook_url: "https://docs.yugabyte.com/latest/troubleshoot/"
+            
+        - alert: YugabyteDBTServerDown
+          expr: up{job="yugabyte-tserver-helm", kubernetes_namespace=~"codet-.*"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB TServer is down"
+            description: "YugabyteDB TServer {{ $labels.instance }} in cluster {{ $labels.kubernetes_namespace }} has been down for more than 2 minutes."
+            runbook_url: "https://docs.yugabyte.com/latest/troubleshoot/"
+
+        - alert: YugabyteDBClusterUnhealthy
+          expr: count by (kubernetes_namespace) (up{job=~"yugabyte-.*", kubernetes_namespace=~"codet-.*"} == 0) > 0
+          for: 1m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB cluster has unhealthy nodes"
+            description: "YugabyteDB cluster {{ $labels.kubernetes_namespace }} has {{ $value }} unhealthy nodes."
+
+    - name: yugabytedb.performance
+      interval: 30s
+      rules:
+        - alert: YugabyteDBHighLatency
+          expr: histogram_quantile(0.99, rate(yugabytedb_sql_latency_bucket{kubernetes_namespace=~"codet-.*"}[5m])) > 1000
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB high query latency"
+            description: "YugabyteDB P99 latency in cluster {{ $labels.kubernetes_namespace }} is {{ $value }}ms, which is above 1000ms threshold."
+
+        - alert: YugabyteDBHighReplicationLag
+          expr: yugabytedb_cdc_max_apply_index_lag_ms{kubernetes_namespace=~"codet-.*"} > 5000
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB high replication lag"
+            description: "YugabyteDB replication lag in cluster {{ $labels.kubernetes_namespace }} is {{ $value }}ms, which indicates potential cross-region replication issues."
+
+        - alert: YugabyteDBHighConnectionCount
+          expr: yugabytedb_server_rpc_connections{kubernetes_namespace=~"codet-.*"} > 500
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB high connection count"
+            description: "YugabyteDB instance {{ $labels.instance }} in cluster {{ $labels.kubernetes_namespace }} has {{ $value }} connections, approaching limits."
+
+        - alert: YugabyteDBQueueBacklog
+          expr: yugabytedb_rpc_inbound_calls_queue_size{kubernetes_namespace=~"codet-.*"} > 100
+          for: 3m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB RPC queue backlog"
+            description: "YugabyteDB instance {{ $labels.instance }} in cluster {{ $labels.kubernetes_namespace }} has {{ $value }} queued RPC calls."
+
+    - name: yugabytedb.resources
+      interval: 60s
+      rules:
+        - alert: YugabyteDBHighMemoryUsage
+          expr: (yugabytedb_generic_current_allocated_bytes{kubernetes_namespace=~"codet-.*"} / yugabytedb_generic_heap_size_bytes{kubernetes_namespace=~"codet-.*"}) * 100 > 85
+          for: 10m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB high memory usage"
+            description: "YugabyteDB instance {{ $labels.instance }} in cluster {{ $labels.kubernetes_namespace }} is using {{ $value }}% of available memory."
+
+        - alert: YugabyteDBLowDiskSpace
+          expr: (kubelet_volume_stats_used_bytes{namespace=~"codet-.*", persistentvolumeclaim=~".*yb.*"} / kubelet_volume_stats_capacity_bytes{namespace=~"codet-.*", persistentvolumeclaim=~".*yb.*"}) * 100 > 80
+          for: 10m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB low disk space"
+            description: "YugabyteDB persistent volume {{ $labels.persistentvolumeclaim }} in cluster {{ $labels.namespace }} is {{ $value }}% full."
+
+    - name: yugabytedb.backup
+      interval: 300s
+      rules:
+        - alert: YugabyteDBBackupFailed
+          expr: (time() - yugabytedb_backup_last_successful_time{kubernetes_namespace=~"codet-.*"}) > 86400
+          for: 0m
+          labels:
+            severity: critical
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB backup failed"
+            description: "YugabyteDB backup in cluster {{ $labels.kubernetes_namespace }} has not completed successfully for more than 24 hours."
+
+        - alert: YugabyteDBBackupWarning
+          expr: (time() - yugabytedb_backup_last_successful_time{kubernetes_namespace=~"codet-staging-yb|codet-prod-yb"}) > 28800
+          for: 0m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB backup overdue"
+            description: "YugabyteDB backup in cluster {{ $labels.kubernetes_namespace }} has not completed for more than 8 hours."
+
+    - name: yugabytedb.multi-cluster
+      interval: 60s
+      rules:
+        - alert: YugabyteDBCrossRegionConnectivityLoss
+          expr: sum by (source_cluster) (up{job="yugabyte-master-helm", kubernetes_namespace=~"codet-.*"}) < 3
+          for: 5m
+          labels:
+            severity: critical
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB cross-region connectivity loss"
+            description: "YugabyteDB multi-cluster setup has lost connectivity to one or more regions. Only {{ $value }} clusters are reachable."
+
+        - alert: YugabyteDBReplicationPartition
+          expr: abs(count by (kubernetes_namespace) (yugabytedb_cluster_num_tablet_servers{kubernetes_namespace=~"codet-.*"}) - 1) > 0
+          for: 10m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB replication partition detected"
+            description: "YugabyteDB cluster {{ $labels.kubernetes_namespace }} may be experiencing replication partitioning."
+
+    - name: kubernetes.yugabytedb
+      interval: 60s
+      rules:
+        - alert: YugabyteDBPodCrashLooping
+          expr: rate(kube_pod_container_status_restarts_total{namespace=~"codet-.*", pod=~"yb-.*"}[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB pod crash looping"
+            description: "YugabyteDB pod {{ $labels.pod }} in cluster {{ $labels.namespace }} is crash looping."
+
+        - alert: YugabyteDBPodNotReady
+          expr: kube_pod_status_ready{namespace=~"codet-.*", pod=~"yb-.*", condition="false"} == 1
+          for: 10m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB pod not ready"
+            description: "YugabyteDB pod {{ $labels.pod }} in cluster {{ $labels.namespace }} has been not ready for more than 10 minutes."
+
+        - alert: YugabyteDBPVCSpaceRunningOut
+          expr: predict_linear(kubelet_volume_stats_used_bytes{namespace=~"codet-.*", persistentvolumeclaim=~".*yb.*"}[6h], 24*3600) / kubelet_volume_stats_capacity_bytes{namespace=~"codet-.*", persistentvolumeclaim=~".*yb.*"} > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB PVC space running out"
+            description: "YugabyteDB PVC {{ $labels.persistentvolumeclaim }} in cluster {{ $labels.namespace }} is predicted to run out of space within 24 hours."
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+  labels:
+    app: alertmanager
+data:
+  alertmanager.yml: |
+    global:
+              # FIXED: Replace localhost with proper SMTP service
+        smtp_smarthost: 'smtp-relay.kube-system.svc.cluster.local:587'
+      smtp_from: 'alertmanager@yourcompany.com'
+      smtp_require_tls: true
+    
+    route:
+      group_by: ['cluster', 'alertname', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: 'default-receiver'
+      routes:
+        # Critical alerts for production
+        - match:
+            severity: critical
+            cluster: codet-prod-yb
+          receiver: 'prod-critical'
+          group_wait: 10s
+          repeat_interval: 1h
+        
+        # Production warnings
+        - match:
+            cluster: codet-prod-yb
+          receiver: 'prod-warnings'
+          
+        # Staging alerts
+        - match:
+            cluster: codet-staging-yb
+          receiver: 'staging-alerts'
+          
+        # Development alerts (low priority)
+        - match:
+            cluster: codet-dev-yb
+          receiver: 'dev-alerts'
+    
+    receivers:
+      - name: 'default-receiver'
+        webhook_configs:
+          - url: 'http://webhook-service:9093/webhook'
+            send_resolved: true
+      
+      - name: 'prod-critical'
+        email_configs:
+          - to: 'oncall-team@yourcompany.com'
+            subject: '🚨 CRITICAL: {{ .GroupLabels.cluster }} Alert'
+            body: |
+              Alert: {{ range .Alerts }}{{ .Annotations.summary }}
+              Description: {{ .Annotations.description }}
+              Cluster: {{ .Labels.cluster }}
+              Severity: {{ .Labels.severity }}
+              {{ end }}
+        slack_configs:
+          - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+            channel: '#alerts-critical'
+            title: '🚨 Production Critical Alert'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+      
+      - name: 'prod-warnings'
+        email_configs:
+          - to: 'devops-team@yourcompany.com'
+            subject: '⚠️ WARNING: {{ .GroupLabels.cluster }} Alert'
+            body: |
+              Alert: {{ range .Alerts }}{{ .Annotations.summary }}
+              Description: {{ .Annotations.description }}
+              Cluster: {{ .Labels.cluster }}
+              {{ end }}
+      
+      - name: 'staging-alerts'
+        slack_configs:
+          - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+            channel: '#alerts-staging'
+            title: 'Staging Environment Alert'
+            text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+      
+      - name: 'dev-alerts'
+        webhook_configs:
+          - url: 'http://dev-webhook:9093/webhook'
+            send_resolved: false
+    
+    inhibit_rules:
+      # Inhibit lower severity alerts when critical alerts are firing
+      - source_match:
+          severity: 'critical'
+        target_match:
+          severity: 'warning'
+        equal: ['cluster', 'service'] 

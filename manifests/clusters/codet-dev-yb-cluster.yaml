@@ -1,108 +1,207 @@
-apiVersion: yugabytedb.yugabyte.com/v1alpha1
-kind: YBCluster
+# YugabyteDB Development Cluster Configuration
+# Environment: Development
+# Cluster: Codet-Dev-YB
+# Region: us-west1, Zone: us-west1-b
+
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: codet-dev-yb
+  name: codet-dev-yb-cluster-config
   namespace: codet-dev-yb
   labels:
-    environment: development
     app: yugabytedb
-    cost: minimal
+    environment: dev
+    cluster: codet-dev-yb
+data:
+  cluster.name: "codet-dev-yb"
+  cluster.region: "us-west1"
+  cluster.zone: "us-west1-b"
+  cluster.environment: "dev"
+  cluster.domain: "codet-dev-yb.local"
+  
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: codet-dev-yb-credentials
+  namespace: codet-dev-yb
+  labels:
+    app: yugabytedb
+    environment: dev
+    cluster: codet-dev-yb
+type: Opaque
+data:
+  # SECURITY: Passwords removed from version control
+  # Generate secrets using: make generate-secrets-dev
+  # Or manually: kubectl create secret generic codet-dev-yb-credentials \
+  #   --from-literal=yugabyte.password="$(openssl rand -base64 32)" \
+  #   --from-literal=postgres.password="$(openssl rand -base64 32)" \
+  #   --namespace=codet-dev-yb
+  yugabyte.password: ""  # Set via external secret management - DO NOT COMMIT PASSWORDS
+  postgres.password: ""  # Set via external secret management - DO NOT COMMIT PASSWORDS
+  
+---
+# Network Policy for Development Environment
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-dev-yb-network-policy
+  namespace: codet-dev-yb
+  labels:
+    app: yugabytedb
+    environment: dev
+    cluster: codet-dev-yb
 spec:
-  image:
-    repository: yugabytedb/yugabyte
-    tag: 2.20.2.0-b98  # Use same stable version as production
-  # MINIMAL: Single replication for development cost savings
-  replicationFactor: 1  # Reduced from 3 for cost
+  podSelector:
+    matchLabels:
+      app: yugabytedb
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow internal cluster communication
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-dev-yb
+    ports:
+    - protocol: TCP
+      port: 7000   # Master Web UI
+    - protocol: TCP
+      port: 7100   # Master RPC
+    - protocol: TCP
+      port: 9000   # TServer Web UI
+    - protocol: TCP
+      port: 9100   # TServer RPC
+    - protocol: TCP
+      port: 5433   # YSQL
+    - protocol: TCP
+      port: 9042   # YCQL
+    - protocol: TCP
+      port: 6379   # YEDIS
+  # Allow from staging and prod for multi-cluster communication
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-staging-yb
+    - namespaceSelector:
+        matchLabels:
+          name: codet-prod-yb
+    ports:
+    - protocol: TCP
+      port: 7100   # Master RPC for multi-cluster
+    - protocol: TCP
+      port: 9100   # TServer RPC for multi-cluster
+  egress:
+  # Allow outbound to other YugabyteDB clusters
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-staging-yb
+    - namespaceSelector:
+        matchLabels:
+          name: codet-prod-yb
+    ports:
+    - protocol: TCP
+      port: 7100
+    - protocol: TCP
+      port: 9100
+  # Allow DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow HTTPS for downloads and updates
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
 
-  # Domain for the cluster
-  domain: cluster.local
+---
+# Service Account for Development YugabyteDB
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codet-dev-yb-service-account
+  namespace: codet-dev-yb
+  labels:
+    app: yugabytedb
+    environment: dev
+    cluster: codet-dev-yb
+automountServiceAccountToken: true
 
-  # Master Node Configuration (minimal dev)
-  master:
-    replicas: 1  # Reduced from 3 for cost savings
-    storage:
-      size: 20Gi  # Increased for better dev experience
-      storageClass: pd-ssd  # Consistent with production for testing
-    resources:
-      requests:
-        cpu: "1"        # Increased for stability
-        memory: 2Gi     # Increased for stability
-      limits:
-        cpu: "2"        # Increased limit
-        memory: 4Gi     # Increased limit
-    # Simplified affinity
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-            - key: node.kubernetes.io/instance-type
-              operator: In
-              values:
-              - e2-micro
-              - e2-small
-    # DISABLED: Authentication and TLS for cost savings
-    enableAuth: false
-    tls:
-      enabled: false
+---
+# Role for Development YugabyteDB
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codet-dev-yb-role
+  namespace: codet-dev-yb
+  labels:
+    app: yugabytedb
+    environment: dev
+    cluster: codet-dev-yb
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets", "deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
-  # T-Server Node Configuration (minimal dev)
-  tserver:
-    replicas: 1  # Reduced from 3 for single node setup
-    storage:
-      size: 50Gi  # Increased for better dev experience
-      storageClass: pd-ssd  # Consistent with production for testing
-    resources:
-      requests:
-        cpu: "2"        # Increased for database workload
-        memory: 4Gi     # Increased for database workload
-      limits:
-        cpu: "4"        # Increased limit for better performance
-        memory: 8Gi     # Increased limit for database operations
-    # Add tolerations for dedicated tserver nodes
-    tolerations:
-    - key: "yugabyte.com/tserver"
-      operator: "Equal"
-      value: "true"
-      effect: "NoSchedule"
-    # Simplified affinity
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-            - key: node.kubernetes.io/instance-type
-              operator: In
-              values:
-              - e2-micro
-              - e2-small
-        # Prefer tserver nodes if available
-        - weight: 80
-          preference:
-            matchExpressions:
-            - key: node-pool
-              operator: In
-              values:
-              - yugabyte-tserver
-    # DISABLED: Authentication and TLS for cost savings
-    enableAuth: false
-    tls:
-      enabled: false
+---
+# RoleBinding for Development YugabyteDB
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codet-dev-yb-rolebinding
+  namespace: codet-dev-yb
+  labels:
+    app: yugabytedb
+    environment: dev
+    cluster: codet-dev-yb
+subjects:
+- kind: ServiceAccount
+  name: codet-dev-yb-service-account
+  namespace: codet-dev-yb
+roleRef:
+  kind: Role
+  name: codet-dev-yb-role
+  apiGroup: rbac.authorization.k8s.io
 
-  # DISABLED: monitoring for cost savings
-  monitoring:
-    enabled: false
+---
+# Pod Disruption Budget for Development
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-dev-yb-master-pdb
+  namespace: codet-dev-yb
+  labels:
+    app: yugabytedb
+    component: master
+    environment: dev
+    cluster: codet-dev-yb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: yb-master
 
-  # Disable service monitor
-  serviceMonitor:
-    enabled: false
-
-  # Updated resource quotas
-  resourceQuota:
-    enabled: true
-    hard:
-      requests.cpu: "6"      # Increased to match new allocations (1+2+buffer)
-      requests.memory: "12Gi" # Increased to match new allocations (2+4+buffer)
-      persistentvolumeclaims: "6" 
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-dev-yb-tserver-pdb
+  namespace: codet-dev-yb
+  labels:
+    app: yugabytedb
+    component: tserver
+    environment: dev
+    cluster: codet-dev-yb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: yb-tserver 

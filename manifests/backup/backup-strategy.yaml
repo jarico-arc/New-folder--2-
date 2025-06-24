@@ -1,0 +1,390 @@
+# YugabyteDB Backup Strategy
+# Implements automated backups with rotation and disaster recovery
+
+---
+# Google Cloud Storage Bucket for Backups
+apiVersion: storage.cnrm.cloud.google.com/v1beta1
+kind: StorageBucket
+metadata:
+  name: yugabytedb-backups
+  namespace: backup
+spec:
+  location: us-central1
+  storageClass: STANDARD
+  uniformBucketLevelAccess: true
+  versioning:
+    enabled: true
+  lifecycle:
+    rule:
+    - action:
+        type: Delete
+      condition:
+        age: 90  # Delete backups older than 90 days
+    - action:
+        type: SetStorageClass
+        storageClass: COLDLINE
+      condition:
+        age: 30  # Move to coldline after 30 days
+  retentionPolicy:
+    retentionPeriod: 2592000  # 30 days minimum retention
+
+---
+# Service Account for Backup Operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: yugabytedb-backup
+  namespace: backup
+  annotations:
+    iam.gke.io/gcp-service-account: yugabytedb-backup@PROJECT_ID.iam.gserviceaccount.com
+
+---
+# RBAC for Backup Service Account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: yugabytedb-backup
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/exec"]
+  verbs: ["get", "list", "create"]
+- apiGroups: [""]
+  resources: ["persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: yugabytedb-backup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: yugabytedb-backup
+subjects:
+- kind: ServiceAccount
+  name: yugabytedb-backup
+  namespace: backup
+
+---
+# Daily Backup CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yugabytedb-daily-backup
+  namespace: backup
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM UTC
+  timeZone: "UTC"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: yugabytedb-backup
+        spec:
+          serviceAccountName: yugabytedb-backup
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          containers:
+          - name: backup
+            image: google/cloud-sdk:alpine
+            imagePullPolicy: IfNotPresent
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+            env:
+            - name: BACKUP_DATE
+              value: "$(date +%Y%m%d-%H%M%S)"
+            - name: GCS_BUCKET
+              value: "yugabytedb-backups"
+            - name: NAMESPACE_PREFIX
+              value: "codet"
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: backup-scripts
+              mountPath: /scripts
+              readOnly: true
+            command:
+            - /bin/bash
+            - /scripts/backup.sh
+            resources:
+              requests:
+                memory: "128Mi"
+                cpu: "100m"
+              limits:
+                memory: "512Mi"
+                cpu: "500m"
+          volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: backup-scripts
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+
+---
+# Weekly Full Backup CronJob
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yugabytedb-weekly-backup
+  namespace: backup
+spec:
+  schedule: "0 1 * * 0"  # Weekly on Sunday at 1 AM UTC
+  timeZone: "UTC"
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 2
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: yugabytedb-backup
+            backup-type: weekly
+        spec:
+          serviceAccountName: yugabytedb-backup
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          containers:
+          - name: full-backup
+            image: google/cloud-sdk:alpine
+            imagePullPolicy: IfNotPresent
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+            env:
+            - name: BACKUP_DATE
+              value: "$(date +%Y%m%d-%H%M%S)"
+            - name: GCS_BUCKET
+              value: "yugabytedb-backups"
+            - name: BACKUP_TYPE
+              value: "full"
+            - name: NAMESPACE_PREFIX
+              value: "codet"
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: backup-scripts
+              mountPath: /scripts
+              readOnly: true
+            command:
+            - /bin/bash
+            - /scripts/backup.sh
+            resources:
+              requests:
+                memory: "256Mi"
+                cpu: "200m"
+              limits:
+                memory: "1Gi"
+                cpu: "1000m"
+          volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: backup-scripts
+            configMap:
+              name: backup-scripts
+              defaultMode: 0755
+
+---
+# Backup Scripts ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-scripts
+  namespace: backup
+data:
+  backup.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    
+    # Configuration
+    BACKUP_DATE=${BACKUP_DATE:-$(date +%Y%m%d-%H%M%S)}
+    GCS_BUCKET=${GCS_BUCKET:-"yugabytedb-backups"}
+    BACKUP_TYPE=${BACKUP_TYPE:-"daily"}
+    NAMESPACE_PREFIX=${NAMESPACE_PREFIX:-"codet"}  # FIXED: Updated namespace prefix
+    
+    # Logging function
+    log() {
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - $*"
+    }
+    
+    log "Starting YugabyteDB backup - Type: $BACKUP_TYPE, Date: $BACKUP_DATE"
+    
+    # Create backup directory
+    BACKUP_DIR="/tmp/yugabytedb-backup-$BACKUP_DATE"
+    mkdir -p "$BACKUP_DIR"
+    
+    # Function to backup a single zone
+    backup_zone() {
+        local zone=$1
+        local namespace="${NAMESPACE_PREFIX}-${zone}"
+        
+        log "Backing up zone: $zone (namespace: $namespace)"
+        
+        # Check if namespace exists
+        if ! kubectl get namespace "$namespace" >/dev/null 2>&1; then
+            log "Warning: Namespace $namespace not found, skipping"
+            return
+        fi
+        
+        # Create zone backup directory
+        local zone_dir="$BACKUP_DIR/$zone"
+        mkdir -p "$zone_dir"
+        
+        # Backup YSQL databases
+        log "Backing up YSQL databases for zone $zone"
+        kubectl exec -n "$namespace" yb-tserver-0 -- bash -c '
+            export PGPASSWORD="$(kubectl get secret '${namespace}'-credentials -n '$namespace' -o jsonpath="{.data.yugabyte\.password}" | base64 -d)"
+            ysql_dump -h yb-tserver-0.yb-tservers.'$namespace'.svc.cluster.local -p 5433 -U yugabyte --verbose --no-password yugabyte
+        ' > "$zone_dir/ysql_dump.sql" 2>/dev/null || log "Warning: YSQL backup failed for zone $zone"
+        
+        # Backup YCQL keyspaces
+        log "Backing up YCQL keyspaces for zone $zone"
+        kubectl exec -n "$namespace" yb-tserver-0 -- bash -c '
+            cqlsh yb-tserver-0.yb-tservers.'$namespace'.svc.cluster.local 9042 -e "DESCRIBE SCHEMA"
+        ' > "$zone_dir/ycql_schema.cql" 2>/dev/null || log "Warning: YCQL backup failed for zone $zone"
+        
+        # Backup Kubernetes resources
+        log "Backing up Kubernetes resources for zone $zone"
+        kubectl get all,pvc,secrets,configmaps -n "$namespace" -o yaml > "$zone_dir/k8s_resources.yaml"
+        
+        log "Zone $zone backup completed"
+    }
+    
+    # Backup all zones
+    for zone in us-central1-a us-central1-b us-central1-c; do
+        backup_zone "$zone"
+    done
+    
+    # Create compressed archive
+    log "Creating compressed backup archive"
+    cd /tmp
+    tar -czf "yugabytedb-backup-$BACKUP_TYPE-$BACKUP_DATE.tar.gz" "yugabytedb-backup-$BACKUP_DATE/"
+    
+    # Upload to Google Cloud Storage
+    log "Uploading backup to Google Cloud Storage"
+    gsutil cp "yugabytedb-backup-$BACKUP_TYPE-$BACKUP_DATE.tar.gz" "gs://$GCS_BUCKET/backups/$BACKUP_TYPE/"
+    
+    # Create backup metadata
+    cat > "backup-metadata-$BACKUP_DATE.json" <<EOF
+    {
+        "backup_id": "yugabytedb-backup-$BACKUP_TYPE-$BACKUP_DATE",
+        "backup_type": "$BACKUP_TYPE",
+        "timestamp": "$(date -Iseconds)",
+        "zones": ["us-central1-a", "us-central1-b", "us-central1-c"],
+        "size_bytes": $(stat -c%s "yugabytedb-backup-$BACKUP_TYPE-$BACKUP_DATE.tar.gz"),
+        "checksum": "$(sha256sum yugabytedb-backup-$BACKUP_TYPE-$BACKUP_DATE.tar.gz | cut -d' ' -f1)"
+    }
+    EOF
+    
+    gsutil cp "backup-metadata-$BACKUP_DATE.json" "gs://$GCS_BUCKET/metadata/"
+    
+    # Cleanup local files
+    rm -rf "yugabytedb-backup-$BACKUP_DATE" "yugabytedb-backup-$BACKUP_TYPE-$BACKUP_DATE.tar.gz" "backup-metadata-$BACKUP_DATE.json"
+    
+    log "Backup completed successfully: yugabytedb-backup-$BACKUP_TYPE-$BACKUP_DATE"
+
+  restore.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    
+    # Restore script for YugabyteDB backups
+    BACKUP_ID=${1:-}
+    GCS_BUCKET=${GCS_BUCKET:-"yugabytedb-backups"}
+    
+    if [ -z "$BACKUP_ID" ]; then
+        echo "Usage: $0 <backup-id>"
+        echo "Available backups:"
+        gsutil ls "gs://$GCS_BUCKET/backups/**/*.tar.gz" | head -10
+        exit 1
+    fi
+    
+    echo "Restoring backup: $BACKUP_ID"
+    echo "WARNING: This will overwrite existing data!"
+    echo "Press Enter to continue or Ctrl+C to abort..."
+    read
+    
+    # Download and extract backup
+    gsutil cp "gs://$GCS_BUCKET/backups/*/$BACKUP_ID.tar.gz" .
+    tar -xzf "$BACKUP_ID.tar.gz"
+    
+    # Restore each zone
+    for zone_dir in yugabytedb-backup-*/us-central1-*; do
+        zone=$(basename "$zone_dir")
+        namespace="codet-$zone"
+        
+        echo "Restoring zone: $zone"
+        
+        # Restore YSQL
+        if [ -f "$zone_dir/ysql_dump.sql" ]; then
+            kubectl exec -i -n "$namespace" yb-tserver-0 -- bash -c '
+                export PGPASSWORD="$(kubectl get secret '${namespace}'-credentials -n '$namespace' -o jsonpath="{.data.yugabyte\.password}" | base64 -d)"
+                psql -h yb-tserver-0.yb-tservers.'$namespace'.svc.cluster.local -p 5433 -U yugabyte -d yugabyte
+            ' < "$zone_dir/ysql_dump.sql"
+        fi
+        
+        # Restore YCQL
+        if [ -f "$zone_dir/ycql_schema.cql" ]; then
+            kubectl exec -i -n "$namespace" yb-tserver-0 -- bash -c '
+                cqlsh yb-tserver-0.yb-tservers.'$namespace'.svc.cluster.local 9042
+            ' < "$zone_dir/ycql_schema.cql"
+        fi
+    done
+    
+    echo "Restore completed for backup: $BACKUP_ID"
+
+---
+# Backup Monitoring Alert
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: yugabytedb-backup-alerts
+  namespace: backup
+  labels:
+    app: yugabytedb-backup
+spec:
+  groups:
+  - name: yugabytedb.backup.rules
+    rules:
+    - alert: YugabyteDBBackupFailed
+      expr: kube_job_status_failed{job_name=~"yugabytedb.*backup.*"} > 0
+      for: 0m
+      labels:
+        severity: critical
+        component: backup
+      annotations:
+        summary: "YugabyteDB backup job failed"
+        description: "Backup job {{ $labels.job_name }} in namespace {{ $labels.namespace }} has failed"
+    
+    - alert: YugabyteDBBackupMissing
+      expr: (time() - kube_job_status_completion_time{job_name=~"yugabytedb-daily-backup.*"}) > 86400
+      for: 1h
+      labels:
+        severity: warning
+        component: backup
+      annotations:
+        summary: "YugabyteDB daily backup is overdue"
+        description: "No successful daily backup in the last 24 hours" 

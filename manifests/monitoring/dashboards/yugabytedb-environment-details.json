@@ -1,0 +1,453 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "YugabyteDB Environment Details",
+    "description": "Detailed metrics for individual YugabyteDB environments with drill-down capabilities",
+    "tags": ["yugabytedb", "environment", "details"],
+    "style": "dark",
+    "timezone": "browser",
+    "editable": true,
+    "graphTooltip": 1,
+    "time": {
+      "from": "now-30m",
+      "to": "now"
+    },
+    "refresh": "15s",
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "title": "Environment Overview - $environment",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+        "collapsed": false
+      },
+      {
+        "id": 2,
+        "title": "Master Node Status",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 8, "x": 0, "y": 1},
+        "targets": [
+          {
+            "expr": "up{job=\"yugabyte-master-helm\", kubernetes_namespace=\"$environment\"}",
+            "legendFormat": "Master {{instance}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "mappings": [
+              {"options": {"0": {"text": "DOWN", "color": "red"}}, "type": "value"},
+              {"options": {"1": {"text": "UP", "color": "green"}}, "type": "value"}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "orientation": "horizontal",
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 3,
+        "title": "TServer Node Status",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 8, "x": 8, "y": 1},
+        "targets": [
+          {
+            "expr": "up{job=\"yugabyte-tserver-helm\", kubernetes_namespace=\"$environment\"}",
+            "legendFormat": "TServer {{instance}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "mappings": [
+              {"options": {"0": {"text": "DOWN", "color": "red"}}, "type": "value"},
+              {"options": {"1": {"text": "UP", "color": "green"}}, "type": "value"}
+            ],
+            "thresholds": {
+              "steps": [
+                {"color": "red", "value": null},
+                {"color": "green", "value": 1}
+              ]
+            }
+          }
+        },
+        "options": {
+          "colorMode": "background",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "orientation": "horizontal",
+          "reduceOptions": {"calcs": ["lastNotNull"]},
+          "textMode": "value_and_name"
+        }
+      },
+      {
+        "id": 4,
+        "title": "Active Connections",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 8, "x": 16, "y": 1},
+        "targets": [
+          {
+            "expr": "sum(yugabytedb_server_rpc_connections{kubernetes_namespace=\"$environment\"})",
+            "legendFormat": "Total Connections",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 50},
+                {"color": "red", "value": 100}
+              ]
+            },
+            "unit": "short"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Performance Metrics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 7},
+        "collapsed": false
+      },
+      {
+        "id": 6,
+        "title": "SQL Operations Rate",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+        "targets": [
+          {
+            "expr": "rate(yugabytedb_sql_selects{kubernetes_namespace=\"$environment\"}[5m])",
+            "legendFormat": "Selects/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(yugabytedb_sql_inserts{kubernetes_namespace=\"$environment\"}[5m])",
+            "legendFormat": "Inserts/sec",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(yugabytedb_sql_updates{kubernetes_namespace=\"$environment\"}[5m])",
+            "legendFormat": "Updates/sec",
+            "refId": "C"
+          },
+          {
+            "expr": "rate(yugabytedb_sql_deletes{kubernetes_namespace=\"$environment\"}[5m])",
+            "legendFormat": "Deletes/sec",
+            "refId": "D"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Response Time Distribution",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(yugabytedb_sql_latency_bucket{kubernetes_namespace=\"$environment\"}[5m]))",
+            "legendFormat": "P50 Latency",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(yugabytedb_sql_latency_bucket{kubernetes_namespace=\"$environment\"}[5m]))",
+            "legendFormat": "P95 Latency",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(yugabytedb_sql_latency_bucket{kubernetes_namespace=\"$environment\"}[5m]))",
+            "legendFormat": "P99 Latency",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "ms",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 100},
+                {"color": "red", "value": 500}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Resource Utilization",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+        "collapsed": false
+      },
+      {
+        "id": 9,
+        "title": "CPU Usage",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 0, "y": 17},
+        "targets": [
+          {
+            "expr": "rate(container_cpu_usage_seconds_total{namespace=\"$environment\", pod=~\"yb-.*\"}[5m]) * 100",
+            "legendFormat": "{{pod}} CPU %",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "percent",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 70},
+                {"color": "red", "value": 90}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Memory Usage",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 8, "y": 17},
+        "targets": [
+          {
+            "expr": "container_memory_usage_bytes{namespace=\"$environment\", pod=~\"yb-.*\"} / container_spec_memory_limit_bytes{namespace=\"$environment\", pod=~\"yb-.*\"} * 100",
+            "legendFormat": "{{pod}} Memory %",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "percent",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 80},
+                {"color": "red", "value": 95}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Disk I/O",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 8, "x": 16, "y": 17},
+        "targets": [
+          {
+            "expr": "rate(container_fs_reads_bytes_total{namespace=\"$environment\", pod=~\"yb-.*\"}[5m])",
+            "legendFormat": "{{pod}} Read Bytes/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(container_fs_writes_bytes_total{namespace=\"$environment\", pod=~\"yb-.*\"}[5m])",
+            "legendFormat": "{{pod}} Write Bytes/sec",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "Bps",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Database Specific Metrics",
+        "type": "row",
+        "gridPos": {"h": 1, "w": 24, "x": 0, "y": 25},
+        "collapsed": false
+      },
+      {
+        "id": 13,
+        "title": "Tablet Count and Distribution",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 26},
+        "targets": [
+          {
+            "expr": "yugabytedb_cluster_num_tablet_servers{kubernetes_namespace=\"$environment\"}",
+            "legendFormat": "Active Tablet Servers",
+            "refId": "A"
+          },
+          {
+            "expr": "yugabytedb_table_tablets_total{kubernetes_namespace=\"$environment\"}",
+            "legendFormat": "Total Tablets",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "fillOpacity": 10
+            }
+          }
+        }
+      },
+      {
+        "id": 14,
+        "title": "RPC Queue Size",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 26},
+        "targets": [
+          {
+            "expr": "yugabytedb_rpc_inbound_calls_queue_size{kubernetes_namespace=\"$environment\"}",
+            "legendFormat": "{{instance}} Inbound Queue",
+            "refId": "A"
+          },
+          {
+            "expr": "yugabytedb_rpc_outbound_calls_queue_size{kubernetes_namespace=\"$environment\"}",
+            "legendFormat": "{{instance}} Outbound Queue",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "unit": "short",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "fillOpacity": 10
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 50},
+                {"color": "red", "value": 100}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 15,
+        "title": "Backup Status (Production Only)",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": 34},
+        "targets": [
+          {
+            "expr": "yugabytedb_backup_last_successful_time{kubernetes_namespace=\"$environment\"}",
+            "legendFormat": "Last Backup Time",
+            "refId": "A",
+            "format": "table",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "custom": {
+              "align": "auto",
+              "displayMode": "auto"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"color": "green", "value": null},
+                {"color": "yellow", "value": 86400},
+                {"color": "red", "value": 172800}
+              ]
+            },
+            "unit": "dateTimeAsIso"
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "current": {"selected": false, "text": "codet-dev-yb", "value": "codet-dev-yb"},
+          "datasource": "Prometheus",
+          "definition": "label_values(up{job=~\"yugabyte.*\"}, kubernetes_namespace)",
+          "hide": 0,
+          "includeAll": false,
+          "label": "Environment",
+          "multi": false,
+          "name": "environment",
+          "options": [],
+          "query": "label_values(up{job=~\"yugabyte.*\"}, kubernetes_namespace)",
+          "refresh": 1,
+          "regex": "codet-.*",
+          "skipUrlSync": false,
+          "sort": 1,
+          "type": "query"
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    }
+  }
+} 

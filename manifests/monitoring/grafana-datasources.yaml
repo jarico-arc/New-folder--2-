@@ -1,0 +1,123 @@
+# Grafana DataSources for Multi-Cluster YugabyteDB
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+  labels:
+    app: grafana
+    component: datasources
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      # Primary Prometheus datasource
+      - name: Prometheus
+        type: prometheus
+        url: http://kube-prometheus-stack-prometheus:9090
+        access: proxy
+        isDefault: true
+        editable: false
+        jsonData:
+          timeInterval: "30s"
+          httpMethod: "POST"
+        
+      # Development cluster specific datasource
+      - name: YugabyteDB-Dev
+        type: prometheus
+        url: http://kube-prometheus-stack-prometheus:9090
+        access: proxy
+        editable: false
+        jsonData:
+          timeInterval: "30s"
+          httpMethod: "POST"
+          exemplarTraceIdDestinations:
+            - name: trace_id
+              datasourceUid: jaeger-dev
+        
+      # Staging cluster specific datasource  
+      - name: YugabyteDB-Staging
+        type: prometheus
+        url: http://kube-prometheus-stack-prometheus:9090
+        access: proxy
+        editable: false
+        jsonData:
+          timeInterval: "15s"
+          httpMethod: "POST"
+          exemplarTraceIdDestinations:
+            - name: trace_id
+              datasourceUid: jaeger-staging
+        
+      # Production cluster specific datasource
+      - name: YugabyteDB-Prod
+        type: prometheus
+        url: http://kube-prometheus-stack-prometheus:9090
+        access: proxy
+        editable: false
+        jsonData:
+          timeInterval: "10s"
+          httpMethod: "POST"
+          exemplarTraceIdDestinations:
+            - name: trace_id
+              datasourceUid: jaeger-prod
+        
+      # Loki for log aggregation across clusters
+      - name: Loki-MultiCluster
+        type: loki
+        url: http://loki:3100
+        access: proxy
+        editable: false
+        jsonData:
+          maxLines: 1000
+          derivedFields:
+            - datasourceUid: jaeger-multi
+              matcherRegex: "trace_id=(\\w+)"
+              name: TraceID
+              url: "$${__value.raw}"
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-providers
+  namespace: monitoring
+  labels:
+    app: grafana
+    component: dashboard-providers
+data:
+  dashboardproviders.yaml: |
+    apiVersion: 1
+    providers:
+      # YugabyteDB Multi-Cluster Dashboards
+      - name: 'yugabytedb-multi-cluster'
+        orgId: 1
+        folder: 'YugabyteDB Multi-Cluster'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards/yugabytedb
+      
+      # Kubernetes Infrastructure Dashboards
+      - name: 'kubernetes-infrastructure'
+        orgId: 1
+        folder: 'Kubernetes Infrastructure'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards/kubernetes
+      
+      # Environment-specific Dashboards
+      - name: 'environment-specific'
+        orgId: 1
+        folder: 'Environment Dashboards'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards/environments 

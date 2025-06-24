@@ -8,7 +8,7 @@ storage:
   persistentVolume:
     enabled: true
     size: 500Gi
-    storageClass: pd-ssd
+    storageClass: ssd-redpanda
     labels:
       app: redpanda
       environment: production

@@ -1,0 +1,195 @@
+# YugabyteDB Multi-Cluster Override File for codet-dev-yb
+# Environment: dev
+# Region: us-west1, Zone: us-west1-b
+
+isMultiAz: true
+AZ: us-west1-b
+
+# Multi-cluster master addresses for all 3 environments
+masterAddresses: "yb-master-0.yb-masters.codet-dev-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-staging-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-prod-yb.svc.cluster.local:7100"
+
+# Storage configuration
+storage:
+  master:
+    storageClass: "ssd-us-west1-b"
+    size: "100Gi"
+  tserver:
+    storageClass: "ssd-us-west1-b"
+    size: "100Gi"
+
+# Replica configuration
+replicas:
+  master: 1
+  tserver: 1
+  totalMasters: 3
+
+# Resource configuration for development
+resource:
+  master:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+  tserver:
+    requests:
+      cpu: "2000m"
+      memory: "4Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+
+# Global flags for multi-cluster setup
+gflags:
+  master:
+    placement_cloud: "gke"
+    placement_region: "us-west1"
+    placement_zone: "us-west1-b"
+    leader_failure_max_missed_heartbeat_periods: 10
+    raft_heartbeat_interval_ms: 1000
+    enable_ysql: true
+    default_memory_limit_to_ram_ratio: 0.85
+    # Multi-cluster specific flags
+    use_private_ip: "cloud"
+    rpc_bind_addresses: "0.0.0.0:7100"
+    server_broadcast_addresses: "0.0.0.0:7000"
+  tserver:
+    placement_cloud: "gke"
+    placement_region: "us-west1"
+    placement_zone: "us-west1-b"
+    leader_failure_max_missed_heartbeat_periods: 10
+    raft_heartbeat_interval_ms: 1000
+    enable_ysql: true
+    default_memory_limit_to_ram_ratio: 0.85
+    # CDC configuration for multi-cluster
+    cdc_max_stream_intent_records: 10000
+    # Multi-cluster specific flags
+    use_private_ip: "cloud"
+    rpc_bind_addresses: "0.0.0.0:9100"
+    server_broadcast_addresses: "0.0.0.0:9000"
+    pgsql_proxy_bind_address: "0.0.0.0:5433"
+    cql_proxy_bind_address: "0.0.0.0:9042"
+    redis_proxy_bind_address: "0.0.0.0:6379"
+
+# Security configuration (minimal for dev)
+auth:
+  enabled: false
+  useSecretFile: false
+
+tls:
+  enabled: false
+  nodeToNode: false
+  clientToServer: false
+
+# Service configuration with private load balancers
+services:
+  master:
+    type: LoadBalancer
+    annotations:
+      cloud.google.com/load-balancer-type: "Internal"
+      networking.gke.io/load-balancer-type: "Internal"
+    ui:
+      type: LoadBalancer
+      annotations:
+        cloud.google.com/load-balancer-type: "Internal"
+        networking.gke.io/load-balancer-type: "Internal"
+  tserver:
+    type: LoadBalancer
+    annotations:
+      cloud.google.com/load-balancer-type: "Internal"
+      networking.gke.io/load-balancer-type: "Internal"
+
+# Pod configuration
+pod:
+  master:
+    tolerations:
+      - key: "environment"
+        operator: "Equal"
+        value: "dev"
+        effect: "NoSchedule"
+    nodeSelector:
+      environment: "dev"
+    annotations:
+      cluster.name: "codet-dev-yb"
+      environment: "dev"
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+  tserver:
+    tolerations:
+      - key: "environment"
+        operator: "Equal"
+        value: "dev"
+        effect: "NoSchedule"
+    nodeSelector:
+      environment: "dev"
+    annotations:
+      cluster.name: "codet-dev-yb"
+      environment: "dev"
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+
+# Network policy
+networkPolicy:
+  enabled: true
+
+# Monitoring
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+
+# Development specific settings
+domainName: codet-dev-yb.local
+image:
+  tag: "2.25.2-b0"
+
+# Multi-cluster universe configuration
+universeConfig:
+  name: "codet-multi-cluster"
+  placement:
+    numReplicas: 3
+    cloudList:
+      - cloud: "gke"
+        regionList:
+          - region: "us-west1"
+            zones:
+              - zone: "us-west1-b"
+                numNodes: 1
+          - region: "us-central1" 
+            zones:
+              - zone: "us-central1-b"
+                numNodes: 1
+          - region: "us-east1"
+            zones:
+              - zone: "us-east1-b"
+                numNodes: 1
+
+# Development specific resource limits
+limits:
+  master:
+    cpu: "1000m"
+    memory: "2Gi"
+  tserver:
+    cpu: "2000m"
+    memory: "4Gi"
+
+# Backup configuration (disabled for dev)
+backups:
+  enabled: false
+
+# Persistent volume configuration
+persistentVolume:
+  master:
+    storageClass: "ssd-us-west1-b"
+    size: "100Gi"
+    annotations:
+      volume.beta.kubernetes.io/storage-class: "ssd-us-west1-b"
+  tserver:
+    storageClass: "ssd-us-west1-b"
+    size: "100Gi"
+    annotations:
+      volume.beta.kubernetes.io/storage-class: "ssd-us-west1-b" 

@@ -1,55 +1,119 @@
+# Pre-commit hooks configuration
+# Ensures code quality and security before commits
+
 repos:
+  # General code formatting and linting
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-      - id: check-added-large-files
+        args: ['--allow-multiple-documents']
+      - id: check-json
       - id: check-merge-conflict
-      - id: debug-statements
+      - id: check-case-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: detect-private-key
+      - id: mixed-line-ending
+      - id: requirements-txt-fixer
 
+  # Python code formatting
   - repo: https://github.com/psf/black
-    rev: 23.11.0
+    rev: 23.12.1
     hooks:
       - id: black
         language_version: python3
-        files: \.py$
+        files: ^cloud-functions/.*\.py$
 
+  # Python import sorting
   - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
+    rev: 5.13.2
     hooks:
       - id: isort
-        files: \.py$
+        files: ^cloud-functions/.*\.py$
 
+  # Python linting
   - repo: https://github.com/pycqa/flake8
-    rev: 6.1.0
+    rev: 7.0.0
     hooks:
       - id: flake8
-        files: \.py$
-        args: [--max-line-length=88, --extend-ignore=E203]
+        files: ^cloud-functions/.*\.py$
+        args: ['--max-line-length=88', '--extend-ignore=E203,W503']
 
+  # Python security linting
   - repo: https://github.com/PyCQA/bandit
     rev: 1.7.5
     hooks:
       - id: bandit
-        files: \.py$
-        args: [-r, --skip, B101]
+        files: ^cloud-functions/.*\.py$
+        args: ['-ll', '--recursive', '--exclude', 'tests']
 
+  # YAML linting
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.33.0
     hooks:
       - id: yamllint
-        files: \.(yaml|yml)$
+        files: ^manifests/.*\.(yaml|yml)$
+        args: ['-c', '.yamllint.yml']
 
-  - repo: https://github.com/koalaman/shellcheck-precommit
-    rev: v0.9.0
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
     hooks:
       - id: shellcheck
-        files: \.sh$
+        files: ^scripts/.*\.sh$
 
-  - repo: https://github.com/antonbabenko/pre-commit-terraform
-    rev: v1.86.0
+  # Dockerfile linting
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
     hooks:
-      - id: terraform_fmt
-      - id: terraform_validate 
+      - id: hadolint
+        files: Dockerfile.*
+
+  # Secrets detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+        exclude: package.lock.json
+
+  # Kubernetes manifest validation
+  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
+    rev: v1.3.2
+    hooks:
+      - id: python-safety-dependencies-check
+        files: requirements.*\.txt$
+
+  # Infrastructure as Code security
+  - repo: https://github.com/bridgecrewio/checkov
+    rev: 3.1.34
+    hooks:
+      - id: checkov
+        files: ^manifests/.*\.(yaml|yml)$
+        args: ['--framework', 'kubernetes']
+
+  # Commit message formatting
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v3.13.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+# Configuration for specific tools
+default_language_version:
+  python: python3.11
+
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false 

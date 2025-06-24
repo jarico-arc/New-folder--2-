@@ -1,219 +1,273 @@
-apiVersion: yugabytedb.yugabyte.com/v1alpha1
-kind: YBCluster
+# YugabyteDB Production Cluster Configuration
+# Environment: Production
+# Cluster: Codet-Prod-YB
+# Region: us-east1, Zone: us-east1-b
+
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: codet-prod-yb
+  name: codet-prod-yb-cluster-config
   namespace: codet-prod-yb
   labels:
-    environment: production
     app: yugabytedb
-    security: enabled
-spec:
-  image:
-    repository: yugabytedb/yugabyte
-    tag: 2.22.0.0-b15  # Updated to latest LTS
-  # ✅ FIXED: Proper replication for production
-  replicationFactor: 3  # ✅ FIXED: High availability
-
-  # Domain for the cluster
-  domain: cluster.local
-
-  # Master Node Configuration (production-grade)
-  master:
-    replicas: 3  # ✅ FIXED: Proper quorum
-    storage:
-      size: 100Gi           # ✅ FIXED: Increased from 10Gi
-      storageClass: pd-ssd  # ✅ FIXED: SSD for performance
-    resources:
-      requests:
-        cpu: "2"       # ✅ FIXED: Increased from 0.5
-        memory: 4Gi    # ✅ FIXED: Increased from 1Gi
-      limits:
-        cpu: "4"       # ✅ FIXED: Increased from 1
-        memory: 8Gi    # ✅ FIXED: Increased from 2Gi
-    # Multi-zone anti-affinity for HA
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-            - key: node.kubernetes.io/instance-type
-              operator: In
-              values:
-              - n2-standard-4
-              - n2-standard-8
-              - n2-highmem-4
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-            - key: app
-              operator: In
-              values: ["yb-master"]
-          topologyKey: kubernetes.io/hostname
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values: ["yb-master"]
-            topologyKey: topology.kubernetes.io/zone
-    # ✅ FIXED: ENABLE Authentication and TLS for production
-    enableAuth: true
-    authCredentials:
-      ysql:
-        user: yugabyte
-        passwordSecretName: yugabyte-auth-secret
-    tls:
-      enabled: true
-      rootCA:
-        cert: yugabyte-tls-ca-cert
-        key: yugabyte-tls-ca-key
-
-  # T-Server Node Configuration (production-grade)
-  tserver:
-    replicas: 3  # ✅ FIXED: High availability
-    storage:
-      size: 500Gi          # ✅ FIXED: Increased from 20Gi
-      storageClass: pd-ssd # ✅ FIXED: SSD for performance
-    resources:
-      requests:
-        cpu: "4"       # ✅ FIXED: Increased from 1
-        memory: 8Gi    # ✅ FIXED: Increased from 2Gi
-      limits:
-        cpu: "8"       # ✅ FIXED: Increased from 1
-        memory: 16Gi   # ✅ FIXED: Increased from 2Gi
-    # Tolerations for dedicated tserver nodes
-    tolerations:
-    - key: "yugabyte.com/tserver"
-      operator: "Equal"
-      value: "true"
-      effect: "NoSchedule"
-    # Multi-zone anti-affinity for HA
-    affinity:
-      nodeAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-          nodeSelectorTerms:
-          - matchExpressions:
-            - key: workload-type
-              operator: In
-              values: ["yugabyte-tserver"]
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-            - key: node.kubernetes.io/instance-type
-              operator: In
-              values:
-              - n2-highmem-4
-              - n2-highmem-8
-              - n2-standard-8
-      podAntiAffinity:
-        requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-            - key: app
-              operator: In
-              values: ["yb-tserver"]
-          topologyKey: kubernetes.io/hostname
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          podAffinityTerm:
-            labelSelector:
-              matchExpressions:
-              - key: app
-                operator: In
-                values: ["yb-tserver"]
-            topologyKey: topology.kubernetes.io/zone
-    # ✅ FIXED: ENABLE Authentication and TLS for production
-    enableAuth: true
-    authCredentials:
-      ysql:
-        user: yugabyte
-        passwordSecretName: yugabyte-auth-secret
-    tls:
-      enabled: true
-      rootCA:
-        cert: yugabyte-tls-ca-cert
-        key: yugabyte-tls-ca-key
-
-  # ✅ FIXED: ENABLE monitoring for production
-  monitoring:
-    enabled: true
-
-  # Enable service monitor
-  serviceMonitor:
-    enabled: true
-
-  # PodDisruptionBudgets for HA
-  podDisruptionBudget:
-    maxUnavailable:
-      master: 1
-      tserver: 1
-
-  # Production resource quotas
-  resourceQuota:
-    enabled: true
-    hard:
-      requests.cpu: "30"      # Increased for 3x3 + headroom
-      requests.memory: "60Gi"  # Increased for 3x3 + headroom
-      persistentvolumeclaims: "10"
+    environment: prod
+    cluster: codet-prod-yb
+data:
+  cluster.name: "codet-prod-yb"
+  cluster.region: "us-east1"
+  cluster.zone: "us-east1-b"
+  cluster.environment: "prod"
+  cluster.domain: "codet-prod-yb.local"
   
-  # ✅ FIXED: Production-grade configurations
-  gflags:
-    master:
-      # Security settings
-      use_client_to_server_encryption: "true"
-      use_node_to_node_encryption: "true"
-      certs_dir: "/opt/certs"
-      # Performance settings
-      tablet_split_size_threshold_bytes: "10737418240"  # 10GB
-      tablet_split_low_phase_size_threshold_bytes: "5368709120"  # 5GB
-      # CDC optimizations
-      cdc_state_checkpoint_update_interval_ms: "15000"
-      # Multi-zone settings
-      placement_cloud: "gcp"
-      placement_region: "us-central1"
-      placement_zone: "us-central1-a,us-central1-b,us-central1-f"
-      
-    tserver:
-      # Security settings
-      use_client_to_server_encryption: "true"
-      use_node_to_node_encryption: "true"
-      certs_dir: "/opt/certs"
-      # Performance settings  
-      memstore_size_mb: "1024"
-      global_memstore_size_mb_max: "2048"
-      # CDC optimizations
-      cdc_state_checkpoint_update_interval_ms: "15000"
-      cdc_checkpoint_opid_interval_ms: "60000"
-      update_min_cdc_indices_interval_secs: "60"
-      cdc_max_stream_intent_records: "1000"
-      log_min_seconds_to_retain: "86400"  # Keep WAL for 24 hours
-      # Multi-zone settings
-      placement_cloud: "gcp"
-      placement_region: "us-central1"
-      placement_zone: "us-central1-a,us-central1-b,us-central1-f"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: codet-prod-yb-credentials
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    environment: prod
+    cluster: codet-prod-yb
+type: Opaque
+data:
+  # SECURITY: Passwords removed from version control - CRITICAL FOR PRODUCTION
+  # Generate secrets using: make generate-secrets-prod
+  # Or manually: kubectl create secret generic codet-prod-yb-credentials \
+  #   --from-literal=yugabyte.password="$(openssl rand -base64 48)" \
+  #   --from-literal=postgres.password="$(openssl rand -base64 48)" \
+  #   --namespace=codet-prod-yb
+  yugabyte.password: ""  # MUST be set via external secret management - NEVER COMMIT
+  postgres.password: ""  # MUST be set via external secret management - NEVER COMMIT
+  
+---
+# Enhanced Network Policy for Production Environment
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-prod-yb-network-policy
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    environment: prod
+    cluster: codet-prod-yb
+spec:
+  podSelector:
+    matchLabels:
+      app: yugabytedb
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Strict internal cluster communication
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-prod-yb
+    - podSelector:
+        matchLabels:
+          app: yugabytedb
+    ports:
+    - protocol: TCP
+      port: 7000   # Master Web UI (restricted)
+    - protocol: TCP
+      port: 7100   # Master RPC
+    - protocol: TCP
+      port: 9000   # TServer Web UI (restricted)
+    - protocol: TCP
+      port: 9100   # TServer RPC
+    - protocol: TCP
+      port: 5433   # YSQL
+    - protocol: TCP
+      port: 9042   # YCQL
+    - protocol: TCP
+      port: 6379   # YEDIS
+  # Limited access from dev and staging for multi-cluster communication
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-dev-yb
+    - namespaceSelector:
+        matchLabels:
+          name: codet-staging-yb
+    ports:
+    - protocol: TCP
+      port: 7100   # Master RPC for multi-cluster only
+    - protocol: TCP
+      port: 9100   # TServer RPC for multi-cluster only
+  egress:
+  # Allow outbound to other YugabyteDB clusters (controlled)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-dev-yb
+    - namespaceSelector:
+        matchLabels:
+          name: codet-staging-yb
+    ports:
+    - protocol: TCP
+      port: 7100
+    - protocol: TCP
+      port: 9100
+  # Allow DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow HTTPS for downloads and updates (restricted)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
 
-  # ✅ FIXED: Complete backup configuration for production
-  backup:
-    enabled: true
-    retentionDays: 30
-    schedule: "0 2 * * *"  # Daily at 2 AM
-    storageBackend:
-      type: "gcs"
-      gcs:
-        bucketName: "yugabytedb-backups-prod"
-        pathPrefix: "codet-prod-yb"
-        # Credentials will be provided via Workload Identity or service account
-        credentialsSecretName: "gcs-backup-credentials"
-    parallelism: 4  # Number of parallel backup streams
-    compression: true
-    encryption: true
-    # Full backup weekly, incremental daily
-    incrementalBackup:
-      enabled: true
-      frequency: "daily"
-      fullBackupFrequency: "weekly" 
+---
+# Service Account for Production YugabyteDB
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codet-prod-yb-service-account
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    environment: prod
+    cluster: codet-prod-yb
+automountServiceAccountToken: true
+
+---
+# Enhanced Role for Production YugabyteDB
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codet-prod-yb-role
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    environment: prod
+    cluster: codet-prod-yb
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]  # More restrictive for secrets in production
+- apiGroups: ["apps"]
+  resources: ["statefulsets", "deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+---
+# RoleBinding for Production YugabyteDB
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codet-prod-yb-rolebinding
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    environment: prod
+    cluster: codet-prod-yb
+subjects:
+- kind: ServiceAccount
+  name: codet-prod-yb-service-account
+  namespace: codet-prod-yb
+roleRef:
+  kind: Role
+  name: codet-prod-yb-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Enhanced Pod Disruption Budget for Production
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-prod-yb-master-pdb
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    component: master
+    environment: prod
+    cluster: codet-prod-yb
+spec:
+  minAvailable: 2  # Higher availability for production
+  selector:
+    matchLabels:
+      app: yb-master
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-prod-yb-tserver-pdb
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    component: tserver
+    environment: prod
+    cluster: codet-prod-yb
+spec:
+  minAvailable: 2  # Higher availability for production
+  selector:
+    matchLabels:
+      app: yb-tserver
+
+---
+# Production Backup Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: codet-prod-yb-backup-config
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    component: backup
+    environment: prod
+    cluster: codet-prod-yb
+data:
+  backup-schedule: "0 2 * * *"  # Daily at 2 AM
+  backup-retention: "30d"
+  backup-location: "gs://codet-prod-yb-backups"
+  backup-encryption: "true"
+
+---
+# Production Security Context Constraints
+apiVersion: v1
+kind: SecurityContextConstraints
+metadata:
+  name: codet-prod-yb-scc
+  labels:
+    app: yugabytedb
+    environment: prod
+    cluster: codet-prod-yb
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegedContainer: false
+allowedCapabilities: []
+defaultAddCapabilities: []
+requiredDropCapabilities:
+- ALL
+fsGroup:
+  type: MustRunAs
+  ranges:
+  - min: 1000
+    max: 65535
+runAsUser:
+  type: MustRunAsNonRoot
+seLinuxContext:
+  type: MustRunAs
+supplementalGroups:
+  type: MustRunAs
+  ranges:
+  - min: 1000
+    max: 65535
+volumes:
+- configMap
+- secret
+- persistentVolumeClaim
+- projected
+- downwardAPI
+- emptyDir 

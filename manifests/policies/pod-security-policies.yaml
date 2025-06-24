@@ -1,0 +1,182 @@
+# Pod Security Standards for YugabyteDB Deployment
+# Implements restricted security policies following Kubernetes Pod Security Standards
+
+---
+# Restricted Pod Security Standard for Production
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codet-dev-yb  # FIXED: Updated from demo namespace
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codet-staging-yb  # FIXED: Updated from demo namespace
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: codet-prod-yb  # FIXED: Updated from demo namespace
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Backup namespace security
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backup
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Kafka namespace security  
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Restricted security for monitoring
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Baseline for Kafka (needs some privileges for persistence)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kafka
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Security Context Constraints (if using OpenShift)
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: yugabytedb-scc
+allowHostDirVolumePlugin: false
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPID: false
+allowHostPorts: false
+allowPrivilegedContainer: false
+allowedCapabilities: []
+defaultAddCapabilities: []
+requiredDropCapabilities:
+- ALL
+fsGroup:
+  type: RunAsAny
+runAsUser:
+  type: MustRunAsNonRoot
+seLinuxContext:
+  type: MustRunAs
+supplementalGroups:
+  type: RunAsAny
+volumes:
+- configMap
+- downwardAPI
+- emptyDir
+- persistentVolumeClaim
+- projected
+- secret
+
+---
+# Pod Disruption Budget for High Availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: yb-master-pdb
+  namespace: codet-dev-yb    # FIXED: Updated namespace
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-master
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: yb-tserver-pdb
+  namespace: codet-dev-yb    # FIXED: Updated namespace
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-tserver
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: yb-master-pdb
+  namespace: codet-staging-yb  # FIXED: Updated namespace
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-master
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: yb-tserver-pdb
+  namespace: codet-staging-yb  # FIXED: Updated namespace
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-tserver
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: yb-master-pdb
+  namespace: codet-prod-yb   # FIXED: Updated namespace
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-master
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: yb-tserver-pdb
+  namespace: codet-prod-yb   # FIXED: Updated namespace
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-tserver 

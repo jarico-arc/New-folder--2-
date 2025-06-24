@@ -1,108 +1,207 @@
-apiVersion: yugabytedb.yugabyte.com/v1alpha1
-kind: YBCluster
+# YugabyteDB Staging Cluster Configuration
+# Environment: Staging
+# Cluster: Codet-Staging-YB
+# Region: us-central1, Zone: us-central1-b
+
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: codet-staging-yb
+  name: codet-staging-yb-cluster-config
   namespace: codet-staging-yb
   labels:
-    environment: staging
     app: yugabytedb
-    cost: minimal
+    environment: staging
+    cluster: codet-staging-yb
+data:
+  cluster.name: "codet-staging-yb"
+  cluster.region: "us-central1"
+  cluster.zone: "us-central1-b"
+  cluster.environment: "staging"
+  cluster.domain: "codet-staging-yb.local"
+  
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: codet-staging-yb-credentials
+  namespace: codet-staging-yb
+  labels:
+    app: yugabytedb
+    environment: staging
+    cluster: codet-staging-yb
+type: Opaque
+data:
+  # SECURITY: Passwords removed from version control
+  # Generate secrets using: make generate-secrets-staging
+  # Or manually: kubectl create secret generic codet-staging-yb-credentials \
+  #   --from-literal=yugabyte.password="$(openssl rand -base64 32)" \
+  #   --from-literal=postgres.password="$(openssl rand -base64 32)" \
+  #   --namespace=codet-staging-yb
+  yugabyte.password: ""  # Set via external secret management - DO NOT COMMIT PASSWORDS
+  postgres.password: ""  # Set via external secret management - DO NOT COMMIT PASSWORDS
+  
+---
+# Network Policy for Staging Environment
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-staging-yb-network-policy
+  namespace: codet-staging-yb
+  labels:
+    app: yugabytedb
+    environment: staging
+    cluster: codet-staging-yb
 spec:
-  image:
-    repository: yugabytedb/yugabyte
-    tag: 2.20.2.0-b98  # Use same stable version as production
-  # MINIMAL: Single replication for staging cost savings
-  replicationFactor: 1  # Reduced from 3 for cost
+  podSelector:
+    matchLabels:
+      app: yugabytedb
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow internal cluster communication
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-staging-yb
+    ports:
+    - protocol: TCP
+      port: 7000   # Master Web UI
+    - protocol: TCP
+      port: 7100   # Master RPC
+    - protocol: TCP
+      port: 9000   # TServer Web UI
+    - protocol: TCP
+      port: 9100   # TServer RPC
+    - protocol: TCP
+      port: 5433   # YSQL
+    - protocol: TCP
+      port: 9042   # YCQL
+    - protocol: TCP
+      port: 6379   # YEDIS
+  # Allow from dev and prod for multi-cluster communication
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-dev-yb
+    - namespaceSelector:
+        matchLabels:
+          name: codet-prod-yb
+    ports:
+    - protocol: TCP
+      port: 7100   # Master RPC for multi-cluster
+    - protocol: TCP
+      port: 9100   # TServer RPC for multi-cluster
+  egress:
+  # Allow outbound to other YugabyteDB clusters
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: codet-dev-yb
+    - namespaceSelector:
+        matchLabels:
+          name: codet-prod-yb
+    ports:
+    - protocol: TCP
+      port: 7100
+    - protocol: TCP
+      port: 9100
+  # Allow DNS
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Allow HTTPS for downloads and updates
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
 
-  # Domain for the cluster
-  domain: cluster.local
+---
+# Service Account for Staging YugabyteDB
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codet-staging-yb-service-account
+  namespace: codet-staging-yb
+  labels:
+    app: yugabytedb
+    environment: staging
+    cluster: codet-staging-yb
+automountServiceAccountToken: true
 
-  # Master Node Configuration (minimal staging)
-  master:
-    replicas: 1  # Reduced from 3 for cost savings
-    storage:
-      size: 20Gi  # Increased for better staging experience
-      storageClass: pd-ssd  # Consistent with production
-    resources:
-      requests:
-        cpu: "0.5"      # Reduced significantly
-        memory: 1Gi     # Reduced from 3Gi
-      limits:
-        cpu: "1"        # Reduced from 2
-        memory: 2Gi     # Reduced from 4Gi
-    # Simplified affinity
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-            - key: node.kubernetes.io/instance-type
-              operator: In
-              values:
-              - e2-micro
-              - e2-small
-    # ENABLED: TLS for security (auth still disabled for cost)
-    enableAuth: false
-    tls:
-      enabled: true
+---
+# Role for Staging YugabyteDB
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: codet-staging-yb-role
+  namespace: codet-staging-yb
+  labels:
+    app: yugabytedb
+    environment: staging
+    cluster: codet-staging-yb
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["statefulsets", "deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
-  # T-Server Node Configuration (minimal staging)
-  tserver:
-    replicas: 1  # Reduced from 3 for single node setup
-    storage:
-      size: 100Gi  # Production-like sizing for proper testing
-      storageClass: pd-ssd  # Consistent with production
-    resources:
-      requests:
-        cpu: "1"        # Consistent baseline
-        memory: 2Gi     # Reduced memory allocation
-      limits:
-        cpu: "1"        # Reduced for cost optimization
-        memory: 2Gi     # Reduced for cost optimization
-    # Add tolerations for dedicated tserver nodes
-    tolerations:
-    - key: "yugabyte.com/tserver"
-      operator: "Equal"
-      value: "true"
-      effect: "NoSchedule"
-    # Simplified affinity
-    affinity:
-      nodeAffinity:
-        preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 100
-          preference:
-            matchExpressions:
-            - key: node.kubernetes.io/instance-type
-              operator: In
-              values:
-              - e2-micro
-              - e2-small
-        # Prefer tserver nodes if available
-        - weight: 80
-          preference:
-            matchExpressions:
-            - key: node-pool
-              operator: In
-              values:
-              - yugabyte-tserver
-    # ENABLED: TLS for security (auth still disabled for cost)
-    enableAuth: false
-    tls:
-      enabled: true
+---
+# RoleBinding for Staging YugabyteDB
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: codet-staging-yb-rolebinding
+  namespace: codet-staging-yb
+  labels:
+    app: yugabytedb
+    environment: staging
+    cluster: codet-staging-yb
+subjects:
+- kind: ServiceAccount
+  name: codet-staging-yb-service-account
+  namespace: codet-staging-yb
+roleRef:
+  kind: Role
+  name: codet-staging-yb-role
+  apiGroup: rbac.authorization.k8s.io
 
-  # DISABLED: monitoring for cost savings
-  monitoring:
-    enabled: false
+---
+# Pod Disruption Budget for Staging
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-staging-yb-master-pdb
+  namespace: codet-staging-yb
+  labels:
+    app: yugabytedb
+    component: master
+    environment: staging
+    cluster: codet-staging-yb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: yb-master
 
-  # Disable service monitor
-  serviceMonitor:
-    enabled: false
-
-  # Minimal resource quotas
-  resourceQuota:
-    enabled: true
-    hard:
-      requests.cpu: "3"      # Reduced limits
-      requests.memory: "4Gi" # Reduced memory
-      persistentvolumeclaims: "3" 
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-staging-yb-tserver-pdb
+  namespace: codet-staging-yb
+  labels:
+    app: yugabytedb
+    component: tserver
+    environment: staging
+    cluster: codet-staging-yb
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: yb-tserver 
