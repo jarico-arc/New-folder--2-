@@ -1,0 +1,201 @@
+# Global configuration with security hardening
+global:
+  rbac:
+    createAggregateClusterRoles: false
+  imagePullSecrets: []
+
+# Prometheus configuration with enhanced security
+prometheus:
+  prometheusSpec:
+    retention: 30d
+    retentionSize: "100GiB"
+    # Security: Non-root container
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+    # Resource management
+    resources:
+      requests:
+        cpu: "2"
+        memory: 8Gi
+      limits:
+        cpu: "4"
+        memory: 16Gi
+    # Persistent storage configuration
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: ssd-monitoring
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 200Gi
+    # Service discovery configuration
+    serviceMonitorSelectorNilUsesHelmValues: false
+    serviceMonitorSelector: {}
+    podMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelector: {}
+    ruleSelectorNilUsesHelmValues: false
+    ruleSelector: {}
+    
+    # Enhanced scrape configs for YugabyteDB multi-cluster
+    additionalScrapeConfigs:
+      - job_name: 'yugabyte-master-helm'
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        metrics_path: /prometheus-metrics
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: ['codet-dev-yb', 'codet-staging-yb', 'codet-prod-yb']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: yb-master
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_ip]
+            action: replace
+            target_label: __address__
+            regex: (.+)
+            replacement: ${1}:7000
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+            
+      - job_name: 'yugabyte-tserver-helm'
+        scrape_interval: 30s
+        scrape_timeout: 10s
+        metrics_path: /prometheus-metrics
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: ['codet-dev-yb', 'codet-staging-yb', 'codet-prod-yb']
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: yb-tserver
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_ip]
+            action: replace
+            target_label: __address__
+            regex: (.+)
+            replacement: ${1}:9000
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+
+# Grafana configuration with security improvements
+grafana:
+  # Security: Use external secret for admin password
+  admin:
+    existingSecret: grafana-admin-secret
+    userKey: admin-user
+    passwordKey: admin-password
+  
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 472
+    fsGroup: 472
+  
+  # Resource management
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  
+  # Persistent storage
+  persistence:
+    enabled: true
+    storageClassName: ssd-monitoring
+    size: 10Gi
+    accessModes:
+      - ReadWriteOnce
+  
+  # Security: Disable anonymous access
+  grafana.ini:
+    security:
+      disable_initial_admin_creation: false
+      admin_user: admin
+      cookie_secure: true
+      cookie_samesite: strict
+    auth.anonymous:
+      enabled: false
+    auth:
+      disable_login_form: false
+    server:
+      protocol: http
+      enforce_domain: false
+      root_url: ""
+  
+  # Pre-configured dashboards for YugabyteDB
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+      - name: 'yugabyte'
+        orgId: 1
+        folder: 'YugabyteDB'
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards/yugabyte
+  
+  dashboards:
+    yugabyte:
+      yugabyte-overview:
+        gnetId: 12620
+        revision: 1
+        datasource: Prometheus
+      yugabyte-cluster:
+        gnetId: 12621  
+        revision: 1
+        datasource: Prometheus
+      kubernetes-cluster:
+        gnetId: 7249
+        revision: 1
+        datasource: Prometheus
+  
+  # Data sources with secure configuration
+  additionalDataSources:
+    - name: Prometheus
+      type: prometheus
+      url: http://kube-prometheus-stack-prometheus:9090
+      access: proxy
+      isDefault: true
+      editable: false
+
+# AlertManager configuration with enhanced security
+alertmanager:
+  alertmanagerSpec:
+    # Security context
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+    
+    # Resource management
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+ 

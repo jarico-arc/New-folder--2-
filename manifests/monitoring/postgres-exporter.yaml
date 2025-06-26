@@ -1,0 +1,757 @@
+# PostgreSQL Exporter for YugabyteDB Client Activity Monitoring
+# Enhanced with Tenant-Level Governance & Telemetry
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-exporter-config
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+data:
+  queries.yaml: |
+    # Client connection tracking
+    pg_stat_activity:
+      query: |
+        SELECT 
+          client_addr as client_ip,
+          datname as database,
+          usename as username,
+          application_name,
+          state,
+          COUNT(*) as connections
+        FROM pg_stat_activity 
+        WHERE client_addr IS NOT NULL 
+        GROUP BY client_addr, datname, usename, application_name, state
+      metrics:
+        - client_ip:
+            usage: "LABEL"
+            description: "Client IP address"
+        - database:
+            usage: "LABEL" 
+            description: "Database name"
+        - username:
+            usage: "LABEL"
+            description: "Username"
+        - application_name:
+            usage: "LABEL"
+            description: "Application name"
+        - state:
+            usage: "LABEL"
+            description: "Connection state"
+        - connections:
+            usage: "GAUGE"
+            description: "Number of connections per client"
+
+    # Query performance per client (requires pg_stat_statements)
+    pg_stat_statements_by_client:
+      query: |
+        SELECT 
+          client_ip,
+          datname as database,
+          usename as username,
+          query,
+          calls,
+          total_time,
+          mean_time,
+          rows,
+          100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0) AS hit_percent
+        FROM pg_stat_statements pss
+        JOIN pg_database pd ON pss.dbid = pd.oid
+        JOIN pg_user pu ON pss.userid = pu.usesysid
+        WHERE client_ip IS NOT NULL
+      metrics:
+        - client_ip:
+            usage: "LABEL"
+            description: "Client IP address"
+        - database:
+            usage: "LABEL"
+            description: "Database name"
+        - username:
+            usage: "LABEL"
+            description: "Username"
+        - query:
+            usage: "LABEL"
+            description: "Query text (truncated)"
+        - calls:
+            usage: "COUNTER"
+            description: "Number of times executed"
+        - total_time:
+            usage: "COUNTER"
+            description: "Total time spent in statement in milliseconds"
+        - mean_time:
+            usage: "GAUGE"
+            description: "Mean time spent in statement in milliseconds"
+        - rows:
+            usage: "COUNTER"
+            description: "Total number of rows returned"
+        - hit_percent:
+            usage: "GAUGE"
+            description: "Buffer cache hit percentage"
+
+    # NEW: Tenant-specific query performance (schema-based tenancy)
+    pg_stat_statements_by_tenant:
+      query: |
+        SELECT 
+          CASE 
+            WHEN schemaname ~ '^([^_]+)_.*' THEN substring(schemaname from '^([^_]+)_.*')
+            WHEN datname != 'yugabyte' THEN datname
+            ELSE 'default'
+          END as tenant_id,
+          datname as database,
+          schemaname,
+          usename as username,
+          calls,
+          total_time,
+          mean_time,
+          rows,
+          shared_blks_hit,
+          shared_blks_read,
+          temp_blks_read,
+          temp_blks_written,
+          blk_read_time,
+          blk_write_time
+        FROM pg_stat_statements pss
+        JOIN pg_database pd ON pss.dbid = pd.oid
+        JOIN pg_user pu ON pss.userid = pu.usesysid
+        LEFT JOIN pg_stat_user_tables st ON st.schemaname = split_part(pss.query, '.', 1)
+        WHERE calls > 0
+      metrics:
+        - tenant_id:
+            usage: "LABEL"
+            description: "Tenant identifier"
+        - database:
+            usage: "LABEL"
+            description: "Database name"
+        - schemaname:
+            usage: "LABEL"
+            description: "Schema name"
+        - username:
+            usage: "LABEL"
+            description: "Username"
+        - calls:
+            usage: "COUNTER"
+            description: "Number of times executed"
+        - total_time:
+            usage: "COUNTER"
+            description: "Total time spent in statement in milliseconds"
+        - mean_time:
+            usage: "GAUGE"
+            description: "Mean time spent in statement in milliseconds"
+        - rows:
+            usage: "COUNTER"
+            description: "Total number of rows returned"
+        - shared_blks_hit:
+            usage: "COUNTER"
+            description: "Total shared block cache hits"
+        - shared_blks_read:
+            usage: "COUNTER"
+            description: "Total shared blocks read from disk"
+        - temp_blks_read:
+            usage: "COUNTER"
+            description: "Total temp blocks read"
+        - temp_blks_written:
+            usage: "COUNTER"
+            description: "Total temp blocks written"
+        - blk_read_time:
+            usage: "COUNTER"
+            description: "Time spent reading blocks in milliseconds"
+        - blk_write_time:
+            usage: "COUNTER"
+            description: "Time spent writing blocks in milliseconds"
+
+    # NEW: Database connection limits and usage
+    pg_database_limits:
+      query: |
+        SELECT 
+          datname as database,
+          datconnlimit as connection_limit,
+          numbackends as current_connections,
+          CASE 
+            WHEN datconnlimit = -1 THEN 0
+            ELSE round((numbackends::float / datconnlimit::float) * 100, 2)
+          END as connection_usage_percent
+        FROM pg_database db
+        JOIN pg_stat_database sd ON db.oid = sd.datid
+        WHERE datname NOT IN ('template0', 'template1', 'postgres')
+      metrics:
+        - database:
+            usage: "LABEL"
+            description: "Database name"
+        - connection_limit:
+            usage: "GAUGE"
+            description: "Database connection limit (-1 = unlimited)"
+        - current_connections:
+            usage: "GAUGE"
+            description: "Current active connections"
+        - connection_usage_percent:
+            usage: "GAUGE"
+            description: "Connection usage percentage"
+
+    # NEW: Long-running queries by tenant
+    pg_long_running_queries:
+      query: |
+        SELECT 
+          CASE 
+            WHEN current_schema ~ '^([^_]+)_.*' THEN substring(current_schema from '^([^_]+)_.*')
+            WHEN datname != 'yugabyte' THEN datname
+            ELSE 'default'
+          END as tenant_id,
+          datname as database,
+          usename as username,
+          application_name,
+          state,
+          COUNT(*) as long_queries,
+          MAX(EXTRACT(EPOCH FROM (now() - query_start))) as max_duration_seconds
+        FROM pg_stat_activity
+        WHERE state = 'active'
+        AND query_start < now() - interval '5 minutes'
+        AND query NOT LIKE '%pg_stat_activity%'
+        GROUP BY tenant_id, datname, usename, application_name, state
+      metrics:
+        - tenant_id:
+            usage: "LABEL"
+            description: "Tenant identifier"
+        - database:
+            usage: "LABEL"
+            description: "Database name"
+        - username:
+            usage: "LABEL"
+            description: "Username"
+        - application_name:
+            usage: "LABEL"
+            description: "Application name"
+        - state:
+            usage: "LABEL"
+            description: "Query state"
+        - long_queries:
+            usage: "GAUGE"
+            description: "Number of long-running queries"
+        - max_duration_seconds:
+            usage: "GAUGE"
+            description: "Maximum query duration in seconds"
+
+    # Resource usage per database/client
+    pg_stat_database_extended:
+      query: |
+        SELECT 
+          datname as database,
+          numbackends,
+          xact_commit,
+          xact_rollback,
+          blks_read,
+          blks_hit,
+          tup_returned,
+          tup_fetched,
+          tup_inserted,
+          tup_updated,
+          tup_deleted,
+          conflicts,
+          temp_files,
+          temp_bytes,
+          deadlocks
+        FROM pg_stat_database
+        WHERE datname NOT IN ('template0', 'template1', 'postgres')
+      metrics:
+        - database:
+            usage: "LABEL"
+            description: "Database name"
+        - numbackends:
+            usage: "GAUGE"
+            description: "Number of backends currently connected"
+        - xact_commit:
+            usage: "COUNTER"
+            description: "Number of transactions committed"
+        - xact_rollback:
+            usage: "COUNTER"
+            description: "Number of transactions rolled back"
+        - blks_read:
+            usage: "COUNTER"
+            description: "Number of disk blocks read"
+        - blks_hit:
+            usage: "COUNTER"
+            description: "Number of buffer hits"
+        - tup_returned:
+            usage: "COUNTER"
+            description: "Number of rows returned by queries"
+        - tup_fetched:
+            usage: "COUNTER"
+            description: "Number of rows fetched by queries"
+        - tup_inserted:
+            usage: "COUNTER"
+            description: "Number of rows inserted"
+        - tup_updated:
+            usage: "COUNTER"
+            description: "Number of rows updated"
+        - tup_deleted:
+            usage: "COUNTER"
+            description: "Number of rows deleted"
+        - conflicts:
+            usage: "COUNTER"
+            description: "Number of queries canceled due to conflicts"
+        - temp_files:
+            usage: "COUNTER"
+            description: "Number of temporary files created"
+        - temp_bytes:
+            usage: "COUNTER"
+            description: "Total amount of data written to temporary files"
+        - deadlocks:
+            usage: "COUNTER"
+            description: "Number of deadlocks detected"
+
+---
+# PostgreSQL Exporter Secret for connection strings
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-exporter-secret
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+type: Opaque
+stringData:
+  # Connection strings for each YugabyteDB cluster
+  # These should be updated with actual credentials
+  dev-connection: "postgresql://yugabyte:CHANGE_ME@yb-tservers.codet-dev-yb.svc.cluster.local:5433/yugabyte?sslmode=prefer"
+  staging-connection: "postgresql://yugabyte:CHANGE_ME@yb-tservers.codet-staging-yb.svc.cluster.local:5433/yugabyte?sslmode=require"
+  prod-connection: "postgresql://yugabyte:CHANGE_ME@yb-tservers.codet-prod-yb.svc.cluster.local:5433/yugabyte?sslmode=require"
+
+---
+# PostgreSQL Exporter Deployment for Dev cluster
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter-dev
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+    cluster: codet-dev-yb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+      cluster: codet-dev-yb
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+        cluster: codet-dev-yb
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+      - name: postgres-exporter
+        image: prometheuscommunity/postgres-exporter:v0.15.0
+        ports:
+        - containerPort: 9187
+          name: metrics
+        env:
+        - name: DATA_SOURCE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: postgres-exporter-secret
+              key: dev-connection
+        - name: PG_EXPORTER_EXTEND_QUERY_PATH
+          value: "/etc/postgres-exporter/queries.yaml"
+        - name: PG_EXPORTER_INCLUDE_DATABASES
+          value: "yugabyte"
+        - name: PG_EXPORTER_AUTO_DISCOVER_DATABASES
+          value: "true"
+        - name: PG_EXPORTER_DISABLE_DEFAULT_METRICS
+          value: "false"
+        - name: PG_EXPORTER_DISABLE_SETTINGS_METRICS
+          value: "false"
+        volumeMounts:
+        - name: queries
+          mountPath: /etc/postgres-exporter
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9187
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9187
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: queries
+        configMap:
+          name: postgres-exporter-config
+
+---
+# PostgreSQL Exporter Deployment for Staging cluster
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter-staging
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+    cluster: codet-staging-yb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+      cluster: codet-staging-yb
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+        cluster: codet-staging-yb
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+      - name: postgres-exporter
+        image: prometheuscommunity/postgres-exporter:v0.15.0
+        ports:
+        - containerPort: 9187
+          name: metrics
+        env:
+        - name: DATA_SOURCE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: postgres-exporter-secret
+              key: staging-connection
+        - name: PG_EXPORTER_EXTEND_QUERY_PATH
+          value: "/etc/postgres-exporter/queries.yaml"
+        - name: PG_EXPORTER_INCLUDE_DATABASES
+          value: "yugabyte"
+        - name: PG_EXPORTER_AUTO_DISCOVER_DATABASES
+          value: "true"
+        volumeMounts:
+        - name: queries
+          mountPath: /etc/postgres-exporter
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9187
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9187
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: queries
+        configMap:
+          name: postgres-exporter-config
+
+---
+# PostgreSQL Exporter Deployment for Production cluster
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-exporter-prod
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+    cluster: codet-prod-yb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-exporter
+      cluster: codet-prod-yb
+  template:
+    metadata:
+      labels:
+        app: postgres-exporter
+        cluster: codet-prod-yb
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+      containers:
+      - name: postgres-exporter
+        image: prometheuscommunity/postgres-exporter:v0.15.0
+        ports:
+        - containerPort: 9187
+          name: metrics
+        env:
+        - name: DATA_SOURCE_NAME
+          valueFrom:
+            secretKeyRef:
+              name: postgres-exporter-secret
+              key: prod-connection
+        - name: PG_EXPORTER_EXTEND_QUERY_PATH
+          value: "/etc/postgres-exporter/queries.yaml"
+        - name: PG_EXPORTER_INCLUDE_DATABASES
+          value: "yugabyte"
+        - name: PG_EXPORTER_AUTO_DISCOVER_DATABASES
+          value: "true"
+        volumeMounts:
+        - name: queries
+          mountPath: /etc/postgres-exporter
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 9187
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 9187
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: queries
+        configMap:
+          name: postgres-exporter-config
+
+---
+# NEW: YugabyteDB YSQL Metrics Scraper for additional endpoints
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: yugabytedb-ysql-exporter
+  namespace: monitoring
+  labels:
+    app: yugabytedb-ysql-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: yugabytedb-ysql-exporter
+  template:
+    metadata:
+      labels:
+        app: yugabytedb-ysql-exporter
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+      - name: prometheus-proxy
+        image: prom/prometheus:v2.40.0
+        args:
+          - "--web.listen-address=:8080"
+          - "--storage.tsdb.path=/tmp/prometheus"
+          - "--storage.tsdb.retention.time=1h"
+          - "--config.file=/etc/prometheus/prometheus.yml"
+        ports:
+        - containerPort: 8080
+          name: metrics
+        volumeMounts:
+        - name: config
+          mountPath: /etc/prometheus
+          readOnly: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+      volumes:
+      - name: config
+        configMap:
+          name: yugabytedb-ysql-exporter-config
+
+---
+# Configuration for YugabyteDB YSQL metrics scraping
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yugabytedb-ysql-exporter-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+    scrape_configs:
+    - job_name: 'yugabytedb-ysql'
+      metrics_path: /prometheus-metrics
+      static_configs:
+      # Dev cluster YSQL endpoints
+      - targets: 
+        - 'yb-tserver-0.yb-tservers.codet-dev-yb.svc.cluster.local:13000'
+        labels:
+          cluster: 'codet-dev-yb'
+          environment: 'development'
+      # Staging cluster YSQL endpoints  
+      - targets:
+        - 'yb-tserver-0.yb-tservers.codet-staging-yb.svc.cluster.local:13000'
+        - 'yb-tserver-1.yb-tservers.codet-staging-yb.svc.cluster.local:13000'
+        labels:
+          cluster: 'codet-staging-yb'
+          environment: 'staging'
+      # Production cluster YSQL endpoints
+      - targets:
+        - 'yb-tserver-0.yb-tservers.codet-prod-yb.svc.cluster.local:13000'
+        - 'yb-tserver-1.yb-tservers.codet-prod-yb.svc.cluster.local:13000'
+        - 'yb-tserver-2.yb-tservers.codet-prod-yb.svc.cluster.local:13000'
+        labels:
+          cluster: 'codet-prod-yb'
+          environment: 'production'
+
+---
+# Services for PostgreSQL Exporters
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter-dev
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+    cluster: codet-dev-yb
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9187
+    targetPort: 9187
+    name: metrics
+  selector:
+    app: postgres-exporter
+    cluster: codet-dev-yb
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter-staging
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+    cluster: codet-staging-yb
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9187
+    targetPort: 9187
+    name: metrics
+  selector:
+    app: postgres-exporter
+    cluster: codet-staging-yb
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-exporter-prod
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+    cluster: codet-prod-yb
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9187
+    targetPort: 9187
+    name: metrics
+  selector:
+    app: postgres-exporter
+    cluster: codet-prod-yb
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: yugabytedb-ysql-exporter
+  namespace: monitoring
+  labels:
+    app: yugabytedb-ysql-exporter
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8080
+    targetPort: 8080
+    name: metrics
+  selector:
+    app: yugabytedb-ysql-exporter
+
+---
+# Service Monitor for PostgreSQL Exporters
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: postgres-exporter
+  namespace: monitoring
+  labels:
+    app: postgres-exporter
+spec:
+  selector:
+    matchLabels:
+      app: postgres-exporter
+  endpoints:
+  - port: metrics
+    interval: 60s
+    path: /metrics
+    scrapeTimeout: 30s
+
+---
+# Service Monitor for YugabyteDB YSQL Exporter
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: yugabytedb-ysql-exporter
+  namespace: monitoring
+  labels:
+    app: yugabytedb-ysql-exporter
+spec:
+  selector:
+    matchLabels:
+      app: yugabytedb-ysql-exporter
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+    scrapeTimeout: 10s 

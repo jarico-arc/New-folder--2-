@@ -78,15 +78,15 @@ create_vpc_network() {
         echo -e "${GREEN}✅ VPC network $vpc_name already exists${NC}"
     fi
     
-    # Create subnets for each environment
+    # Create subnets for each environment with non-overlapping secondary ranges
     local subnets=(
-        "dev-subnet:${REGION_DEV}:10.1.0.0/16"
-        "staging-subnet:${REGION_STAGING}:10.2.0.0/16"
-        "prod-subnet:${REGION_PROD}:10.3.0.0/16"
+        "dev-subnet:${REGION_DEV}:10.1.0.0/16:172.16.0.0/14:172.20.0.0/20"
+        "staging-subnet:${REGION_STAGING}:10.2.0.0/16:172.24.0.0/14:172.28.0.0/20"
+        "prod-subnet:${REGION_PROD}:10.3.0.0/16:172.32.0.0/14:172.36.0.0/20"
     )
     
     for subnet_config in "${subnets[@]}"; do
-        IFS=':' read -r subnet_name region cidr <<< "$subnet_config"
+        IFS=':' read -r subnet_name region cidr pods_range services_range <<< "$subnet_config"
         
         if ! gcloud compute networks subnets describe $subnet_name --region=$region &>/dev/null; then
             echo -e "${BLUE}Creating subnet: $subnet_name in $region${NC}"
@@ -94,8 +94,7 @@ create_vpc_network() {
                 --network=$vpc_name \
                 --region=$region \
                 --range=$cidr \
-                --enable-ip-alias \
-                --secondary-range=pods=10.${subnet_name#*-subnet}0.0.0/14,services=10.${subnet_name#*-subnet}16.0.0/20
+                --secondary-range=pods=$pods_range,services=$services_range
         else
             echo -e "${GREEN}✅ Subnet $subnet_name already exists${NC}"
         fi
@@ -103,19 +102,19 @@ create_vpc_network() {
     
     # Create firewall rules for internal communication
     local firewall_rules=(
-        "allow-yugabytedb-internal:10.0.0.0/8:tcp:7000,7100,9000,9100,5433,9042,6379"
+        "allow-yugabytedb-internal:10.0.0.0/8:tcp:7000,tcp:7100,tcp:9000,tcp:9100,tcp:5433,tcp:9042,tcp:6379"
         "allow-ssh-private:10.0.0.0/8:tcp:22"
-        "allow-dns-private:10.0.0.0/8:tcp,udp:53"
+        "allow-dns-private:10.0.0.0/8:tcp:53,udp:53"
     )
     
     for rule_config in "${firewall_rules[@]}"; do
-        IFS=':' read -r rule_name source_range protocol ports <<< "$rule_config"
+        IFS=':' read -r rule_name source_range protocols <<< "$rule_config"
         
         if ! gcloud compute firewall-rules describe $rule_name &>/dev/null; then
             echo -e "${BLUE}Creating firewall rule: $rule_name${NC}"
             gcloud compute firewall-rules create $rule_name \
                 --network=$vpc_name \
-                --allow=$protocol:$ports \
+                --allow=$protocols \
                 --source-ranges=$source_range \
                 --target-tags=yugabytedb
         else
@@ -138,20 +137,36 @@ create_gke_clusters() {
         # Determine subnet name based on environment
         local subnet_name="${env}-subnet"
         
-        # Set cluster size based on environment
-        local node_count=1
-        local machine_type="e2-standard-4"
+        # Set cluster size and master CIDR based on environment
+        local node_count
+        local machine_type
+        local master_cidr
+
         if [ "$env" = "prod" ]; then
             node_count=3
             machine_type="e2-standard-8"
+            master_cidr="192.168.3.0/28"
         elif [ "$env" = "staging" ]; then
             node_count=2
             machine_type="e2-standard-4"
+            master_cidr="192.168.2.0/28"
+        else # dev
+            node_count=2 # Increased from 1 for monitoring stack
+            machine_type="e2-standard-4"
+            master_cidr="192.168.1.0/28"
         fi
         
         # Check if cluster already exists
         if gcloud container clusters describe $cluster_name --region=$region &>/dev/null; then
             echo -e "${GREEN}✅ Cluster $cluster_name already exists${NC}"
+
+            # Ensure node count is correct for existing clusters
+            echo -e "${BLUE}Ensuring node count for $cluster_name is set to $node_count...${NC}"
+            gcloud container clusters resize $cluster_name \
+                --region=$region \
+                --num-nodes=$node_count \
+                --quiet
+
             continue
         fi
         
@@ -165,33 +180,15 @@ create_gke_clusters() {
             --disk-type=pd-ssd \
             --network=yugabytedb-private-vpc \
             --subnetwork=$subnet_name \
-            --cluster-secondary-range-name=pods \
-            --services-secondary-range-name=services \
             --enable-private-nodes \
-            --master-ipv4-cidr=172.16.${env:0:1}.0/28 \
+            --master-ipv4-cidr=$master_cidr \
             --enable-ip-alias \
             --enable-network-policy \
             --enable-shielded-nodes \
-            --shielded-secure-boot \
-            --shielded-integrity-monitoring \
-            --node-taints=environment=$env:NoSchedule \
             --node-labels=environment=$env,cluster=$cluster_name \
             --tags=yugabytedb,$env \
-            --enable-autoscaling \
-            --min-nodes=1 \
-            --max-nodes=5 \
-            --enable-autorepair \
-            --enable-autoupgrade \
-            --maintenance-window-start=2024-01-01T02:00:00Z \
-            --maintenance-window-end=2024-01-01T06:00:00Z \
-            --maintenance-window-recurrence="FREQ=WEEKLY;BYDAY=SU" \
             --workload-pool=${PROJECT_ID}.svc.id.goog \
-            --enable-logging \
-            --enable-monitoring \
-            --logging=SYSTEM,WORKLOAD,API_SERVER \
-            --monitoring=SYSTEM,WORKLOAD \
-            --release-channel=stable \
-            --cluster-version=1.28
+            --release-channel=stable
         
         # Get cluster credentials
         gcloud container clusters get-credentials $cluster_name --region=$region
@@ -203,6 +200,32 @@ create_gke_clusters() {
         
         echo -e "${GREEN}✅ Cluster $cluster_name created successfully${NC}"
     done
+}
+
+# Function to authorize external IP for kubectl access
+authorize_kubectl_access() {
+    echo -e "\n${YELLOW}🔐 Authorizing external IP for kubectl access...${NC}"
+
+    # Get external IP of the current machine
+    local external_ip=$(curl -s --fail ifconfig.me || curl -s --fail icanhazip.com)
+    if [ -z "$external_ip" ]; then
+        echo -e "${RED}❌ Could not determine external IP address. Please check your internet connection.${NC}"
+        exit 1
+    fi
+    echo -e "${BLUE}Detected external IP: ${external_ip}${NC}"
+
+    for cluster_config in "${CLUSTERS[@]}"; do
+        IFS=':' read -r cluster_name region zone env <<< "$cluster_config"
+
+        echo -e "${BLUE}Authorizing IP for $cluster_name...${NC}"
+        gcloud container clusters update $cluster_name \
+            --region=$region \
+            --enable-master-authorized-networks \
+            --master-authorized-networks="${external_ip}/32" \
+            --quiet
+    done
+
+    echo -e "${GREEN}✅ External IP authorized for all clusters.${NC}"
 }
 
 # Function to create storage classes
@@ -222,7 +245,7 @@ create_storage_classes() {
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: "ssd-${zone}"
+  name: "standard-rwo"
   labels:
     environment: "${env}"
     cluster: "${cluster_name}"
@@ -365,10 +388,10 @@ masterAddresses: "${master_addresses}"
 # Storage configuration
 storage:
   master:
-    storageClass: "ssd-${zone}"
+    storageClass: "standard-rwo"
     size: "${storage_size}"
   tserver:
-    storageClass: "ssd-${zone}"
+    storageClass: "standard-rwo"
     size: "${storage_size}"
 
 # Replica configuration
@@ -469,8 +492,7 @@ networkPolicy:
 
 # Monitoring
 serviceMonitor:
-  enabled: true
-  namespace: monitoring
+  enabled: false
 
 # Environment-specific configurations
 $(if [ "$env" = "dev" ]; then cat <<DEV_EOF
@@ -630,6 +652,7 @@ main() {
     check_prerequisites
     create_vpc_network
     create_gke_clusters
+    authorize_kubectl_access
     create_storage_classes
     setup_global_dns
     create_namespaces
@@ -656,6 +679,7 @@ case "${1:-all}" in
         ;;
     "clusters")
         create_gke_clusters
+        authorize_kubectl_access
         ;;
     "storage")
         create_storage_classes

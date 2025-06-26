@@ -1,0 +1,415 @@
+# YugabyteDB Performance and Tenant Governance Configuration Overrides
+# Implements query-level CPU/Memory/I/O caps and tenant budgets
+
+---
+# Development Environment Overrides
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yugabytedb-dev-performance-config
+  namespace: codet-dev-yb
+  labels:
+    app: yugabytedb
+    environment: development
+data:
+  # TServer configuration for development
+  tserver_flags: |
+    # Memory limits and ratios
+    --default_memory_limit_to_ram_ratio=0.60
+    --memory_limit_hard_bytes=4294967296  # 4GB hard limit
+    --db_block_cache_size_percentage=25
+    
+    # Query performance settings  
+    --max_concurrent_tablet_remote_bootstrap=2
+    --remote_bootstrap_rate_limit_bytes_per_sec=67108864  # 64MB/s
+    
+    # Background I/O throttling (permissive for dev)
+    --rocksdb_max_background_flushes=2
+    --rocksdb_max_background_compactions=2
+    --compaction_throttling_kbps_per_sec=51200  # 50MB/s
+    
+    # YSQL connection and query limits (relaxed for dev)
+    --ysql_max_connections=200
+    --ysql_statement_timeout_ms=300000  # 5 minutes
+    --enable_ysql_conn_mgr=true
+    
+    # Enable advanced monitoring
+    --enable_ysql_conn_mgr_stats=true
+    --ysql_enable_profile=true
+
+  # YSQL (PostgreSQL) configuration
+  postgresql_conf: |
+    # Work memory and temp file limits
+    work_mem = '128MB'
+    temp_file_limit = '2GB'
+    
+    # Connection settings
+    max_connections = 200
+    shared_preload_libraries = 'pg_stat_statements'
+    
+    # Query performance
+    statement_timeout = '300s'
+    lock_timeout = '30s'
+    idle_in_transaction_session_timeout = '300s'
+    
+    # Enable pg_stat_statements for tenant monitoring
+    pg_stat_statements.max = 10000
+    pg_stat_statements.track = 'all'
+    pg_stat_statements.track_utility = on
+    pg_stat_statements.save = on
+
+---
+# Staging Environment Overrides  
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yugabytedb-staging-performance-config
+  namespace: codet-staging-yb
+  labels:
+    app: yugabytedb
+    environment: staging
+data:
+  # TServer configuration for staging
+  tserver_flags: |
+    # Memory limits and ratios
+    --default_memory_limit_to_ram_ratio=0.70
+    --memory_limit_hard_bytes=8589934592  # 8GB hard limit
+    --db_block_cache_size_percentage=30
+    
+    # Query performance settings
+    --max_concurrent_tablet_remote_bootstrap=3
+    --remote_bootstrap_rate_limit_bytes_per_sec=134217728  # 128MB/s
+    
+    # Background I/O throttling (moderate for staging)
+    --rocksdb_max_background_flushes=3
+    --rocksdb_max_background_compactions=3
+    --compaction_throttling_kbps_per_sec=102400  # 100MB/s during business hours
+    
+    # YSQL connection and query limits
+    --ysql_max_connections=500
+    --ysql_statement_timeout_ms=600000  # 10 minutes
+    --enable_ysql_conn_mgr=true
+    
+    # Tenant workload isolation (YB 2.22+)
+    --enable_tablet_split_of_pitr_tables=true
+    --automatic_tablet_splitting=true
+    --tablet_split_size_threshold_bytes=1073741824  # 1GB
+    
+    # Enable advanced monitoring
+    --enable_ysql_conn_mgr_stats=true
+    --ysql_enable_profile=true
+
+  # YSQL configuration for staging
+  postgresql_conf: |
+    # Work memory and temp file limits (stricter)
+    work_mem = '256MB'
+    temp_file_limit = '4GB'
+    
+    # Connection settings
+    max_connections = 500
+    shared_preload_libraries = 'pg_stat_statements'
+    
+    # Query performance
+    statement_timeout = '600s'
+    lock_timeout = '60s'
+    idle_in_transaction_session_timeout = '600s'
+    
+    # Enable pg_stat_statements for tenant monitoring
+    pg_stat_statements.max = 20000
+    pg_stat_statements.track = 'all'
+    pg_stat_statements.track_utility = on
+    pg_stat_statements.save = on
+    
+    # Logging for analysis
+    log_statement = 'all'
+    log_duration = on
+    log_min_duration_statement = 5000  # Log queries > 5s
+
+---
+# Production Environment Overrides
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: yugabytedb-prod-performance-config
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    environment: production
+data:
+  # TServer configuration for production
+  tserver_flags: |
+    # Memory limits and ratios (strict)
+    --default_memory_limit_to_ram_ratio=0.75
+    --memory_limit_hard_bytes=17179869184  # 16GB hard limit
+    --db_block_cache_size_percentage=35
+    
+    # Query performance settings
+    --max_concurrent_tablet_remote_bootstrap=4
+    --remote_bootstrap_rate_limit_bytes_per_sec=268435456  # 256MB/s
+    
+    # Background I/O throttling (time-based for production)
+    --rocksdb_max_background_flushes=4
+    --rocksdb_max_background_compactions=4
+    --compaction_throttling_kbps_per_sec=204800  # 200MB/s (can be adjusted hourly)
+    
+    # YSQL connection and query limits (strict)
+    --ysql_max_connections=1000
+    --ysql_statement_timeout_ms=900000  # 15 minutes max
+    --enable_ysql_conn_mgr=true
+    
+    # Tenant workload isolation (YB 2.22+)
+    --enable_tablet_split_of_pitr_tables=true
+    --automatic_tablet_splitting=true
+    --tablet_split_size_threshold_bytes=2147483648  # 2GB
+    --enable_automatic_tablet_splitting=true
+    
+    # Resource isolation via placement policies
+    --placement_cloud=gcp
+    --placement_region=us-east1
+    --placement_zone=us-east1-b
+    
+    # Enable advanced monitoring and profiling
+    --enable_ysql_conn_mgr_stats=true
+    --ysql_enable_profile=true
+    --ysql_log_statement=all
+    
+    # Security and performance
+    --use_cassandra_authentication=true
+    --ycql_require_drop_privs_for_truncate=true
+
+  # YSQL configuration for production (strict tenant governance)
+  postgresql_conf: |
+    # Work memory and temp file limits (strict)
+    work_mem = '512MB'
+    temp_file_limit = '8GB'
+    
+    # Connection settings
+    max_connections = 1000
+    shared_preload_libraries = 'pg_stat_statements'
+    
+    # Query performance (strict timeouts)
+    statement_timeout = '900s'  # 15 minutes
+    lock_timeout = '120s'
+    idle_in_transaction_session_timeout = '300s'
+    
+    # Enable comprehensive pg_stat_statements for tenant monitoring
+    pg_stat_statements.max = 50000
+    pg_stat_statements.track = 'all'
+    pg_stat_statements.track_utility = on
+    pg_stat_statements.save = on
+    pg_stat_statements.track_planning = on
+    
+    # Logging for security and analysis
+    log_statement = 'ddl'
+    log_duration = on
+    log_min_duration_statement = 10000  # Log queries > 10s
+    log_checkpoints = on
+    log_connections = on
+    log_disconnections = on
+    log_lock_waits = on
+    
+    # Memory and performance settings
+    shared_buffers = '2GB'
+    effective_cache_size = '12GB'
+    maintenance_work_mem = '1GB'
+    checkpoint_completion_target = 0.9
+    wal_buffers = '64MB'
+    
+    # Security settings
+    ssl = on
+    ssl_prefer_server_ciphers = on
+
+---
+# CronJob for automated I/O throttling adjustments
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yugabytedb-io-throttle-scheduler
+  namespace: codet-prod-yb
+  labels:
+    app: yugabytedb
+    component: performance-tuning
+spec:
+  # Run every hour to adjust I/O throttling
+  schedule: "0 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: yugabytedb-performance-tuner
+          containers:
+          - name: io-throttle-adjuster
+            image: yugabytedb/yugabyte:2.25.2.0-b26
+            command:
+            - /bin/bash
+            - -c
+            - |
+              #!/bin/bash
+              
+              # Get current hour (0-23)
+              HOUR=$(date +%H)
+              
+              # Define business hours (9 AM to 6 PM UTC)
+              if [ $HOUR -ge 9 ] && [ $HOUR -le 18 ]; then
+                # Business hours: Lower compaction throttling
+                NEW_THROTTLE="102400"  # 100MB/s
+                echo "Business hours detected. Setting compaction throttling to ${NEW_THROTTLE} KB/s"
+              else
+                # Off hours: Higher compaction throttling
+                NEW_THROTTLE="512000"  # 500MB/s
+                echo "Off hours detected. Setting compaction throttling to ${NEW_THROTTLE} KB/s"
+              fi
+              
+              # Apply to all tserver pods
+              for pod in $(kubectl get pods -n codet-prod-yb -l app=yb-tserver -o name); do
+                echo "Updating $pod with new throttling value..."
+                kubectl exec -n codet-prod-yb $pod -- \
+                  /home/yugabyte/bin/yb-ts-cli \
+                  --server_address=localhost:9100 \
+                  set_flag compaction_throttling_kbps_per_sec $NEW_THROTTLE
+              done
+              
+              echo "I/O throttling adjustment completed at $(date)"
+          restartPolicy: OnFailure
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+
+---
+# ServiceAccount for performance tuning operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: yugabytedb-performance-tuner
+  namespace: codet-prod-yb
+
+---
+# ClusterRole for performance tuning
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: yugabytedb-performance-tuner
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/exec"]
+  verbs: ["get", "list", "create"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "update", "patch"]
+
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: yugabytedb-performance-tuner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: yugabytedb-performance-tuner
+subjects:
+- kind: ServiceAccount
+  name: yugabytedb-performance-tuner
+  namespace: codet-prod-yb
+
+---
+# Tenant Database Creation Template
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-database-template
+  namespace: monitoring
+  labels:
+    app: yugabytedb
+    component: tenant-management
+data:
+  create_tenant_database.sql: |
+    -- Template for creating tenant-specific databases with governance
+    -- Usage: Replace {TENANT_NAME} and {CONNECTION_LIMIT} with actual values
+    
+    -- Create tenant-specific database
+    CREATE DATABASE {TENANT_NAME}_db 
+    WITH CONNECTION LIMIT {CONNECTION_LIMIT};
+    
+    -- Create tenant-specific role
+    CREATE ROLE {TENANT_NAME}_user 
+    WITH LOGIN 
+    CONNECTION LIMIT {CONNECTION_LIMIT}
+    PASSWORD '{GENERATED_PASSWORD}';
+    
+    -- Grant database access to tenant role
+    GRANT CONNECT ON DATABASE {TENANT_NAME}_db TO {TENANT_NAME}_user;
+    GRANT CREATE ON DATABASE {TENANT_NAME}_db TO {TENANT_NAME}_user;
+    
+    -- Create tenant-specific schema
+    \c {TENANT_NAME}_db
+    CREATE SCHEMA {TENANT_NAME}_schema AUTHORIZATION {TENANT_NAME}_user;
+    
+    -- Set default schema for tenant
+    ALTER ROLE {TENANT_NAME}_user SET search_path = {TENANT_NAME}_schema;
+    
+    -- Create resource monitoring view for tenant
+    CREATE OR REPLACE VIEW {TENANT_NAME}_schema.resource_usage AS
+    SELECT 
+      current_timestamp as snapshot_time,
+      (SELECT count(*) FROM pg_stat_activity WHERE usename = '{TENANT_NAME}_user') as active_connections,
+      (SELECT sum(calls) FROM pg_stat_statements pss JOIN pg_roles pr ON pss.userid = pr.oid WHERE pr.rolname = '{TENANT_NAME}_user') as total_queries,
+      (SELECT sum(total_time) FROM pg_stat_statements pss JOIN pg_roles pr ON pss.userid = pr.oid WHERE pr.rolname = '{TENANT_NAME}_user') as total_time_ms
+    ;
+    
+    -- Grant monitoring access to postgres exporter
+    GRANT SELECT ON {TENANT_NAME}_schema.resource_usage TO yugabyte;
+
+  tenant_governance_functions.sql: |
+    -- Tenant governance utility functions
+    
+    -- Function to set tenant connection limit
+    CREATE OR REPLACE FUNCTION set_tenant_connection_limit(
+      tenant_name TEXT, 
+      new_limit INTEGER
+    ) RETURNS TEXT AS $$
+    BEGIN
+      EXECUTE format('ALTER DATABASE %I CONNECTION LIMIT %s', tenant_name || '_db', new_limit);
+      EXECUTE format('ALTER ROLE %I CONNECTION LIMIT %s', tenant_name || '_user', new_limit);
+      RETURN format('Updated connection limit for tenant %s to %s', tenant_name, new_limit);
+    END;
+    $$ LANGUAGE plpgsql;
+    
+    -- Function to kill tenant sessions
+    CREATE OR REPLACE FUNCTION kill_tenant_sessions(
+      tenant_name TEXT,
+      max_duration_seconds INTEGER DEFAULT 600
+    ) RETURNS TABLE(killed_pid INTEGER, killed_query TEXT) AS $$
+    BEGIN
+      RETURN QUERY
+      SELECT 
+        pg_cancel_backend(pid) as killed_pid,
+        query as killed_query
+      FROM pg_stat_activity 
+      WHERE usename = tenant_name || '_user'
+      AND state = 'active'
+      AND now() - query_start > make_interval(secs => max_duration_seconds);
+    END;
+    $$ LANGUAGE plpgsql;
+    
+    -- Function to get tenant resource usage
+    CREATE OR REPLACE FUNCTION get_tenant_resource_usage(tenant_name TEXT)
+    RETURNS TABLE(
+      connections INTEGER,
+      cpu_time_seconds NUMERIC,
+      temp_bytes BIGINT,
+      query_count BIGINT
+    ) AS $$
+    BEGIN
+      RETURN QUERY
+      SELECT 
+        (SELECT count(*)::INTEGER FROM pg_stat_activity WHERE usename = tenant_name || '_user'),
+        (SELECT sum(total_time)/1000 FROM pg_stat_statements pss JOIN pg_roles pr ON pss.userid = pr.oid WHERE pr.rolname = tenant_name || '_user'),
+        (SELECT sum(temp_bytes) FROM pg_stat_statements pss JOIN pg_roles pr ON pss.userid = pr.oid WHERE pr.rolname = tenant_name || '_user'),
+        (SELECT sum(calls) FROM pg_stat_statements pss JOIN pg_roles pr ON pss.userid = pr.oid WHERE pr.rolname = tenant_name || '_user');
+    END;
+    $$ LANGUAGE plpgsql; 

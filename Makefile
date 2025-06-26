@@ -13,8 +13,9 @@ REGION ?= us-central1
 ENVIRONMENT ?= dev
 
 # Multi-cluster configuration
-CLUSTERS := codet-dev-yb codet-staging-yb codet-prod-yb
-REGIONS := us-west1 us-central1 us-east1
+# Note: Staging cluster temporarily removed per user request - can be re-added later
+CLUSTERS := codet-dev-yb codet-prod-yb
+REGIONS := us-west1 us-east1
 
 # Tool versions
 KUBECTL_VERSION := v1.28.0
@@ -385,7 +386,7 @@ quick-status: ## Quick status check
 # === SECURITY: SECRET GENERATION TARGETS - FIXED CRITICAL ISSUE ===
 .PHONY: generate-secrets generate-secrets-dev generate-secrets-staging generate-secrets-prod generate-grafana-secret
 
-generate-secrets: generate-secrets-dev generate-secrets-staging generate-secrets-prod generate-grafana-secret ## Generate all secrets for all environments
+generate-secrets: generate-secrets-dev generate-secrets-prod generate-grafana-secret ## Generate all secrets for active environments (staging excluded)
 	@echo "$(GREEN)✅ All secrets generated$(NC)"
 
 generate-secrets-dev: ## Generate development environment secrets

@@ -1,0 +1,594 @@
+# Tenant Analytics and Kill-Switch Automation
+# Implements automated hourly snapshots and runaway query termination
+
+---
+# CronJob for automated pg_stat_statements snapshots
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tenant-analytics-snapshot
+  namespace: monitoring
+  labels:
+    app: yugabytedb
+    component: tenant-analytics
+spec:
+  # Run every hour at minute 0
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: tenant-analytics-sa
+          containers:
+          - name: analytics-collector
+            image: postgres:15-alpine
+            env:
+            - name: DEV_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-secret
+                  key: dev-connection
+            - name: STAGING_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-secret
+                  key: staging-connection
+            - name: PROD_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-secret
+                  key: prod-connection
+            command:
+            - /bin/bash
+            - -c
+            - |
+              #!/bin/bash
+              set -e
+              
+              echo "Starting tenant analytics snapshot at $(date)"
+              
+              # Function to process each cluster
+              process_cluster() {
+                local cluster_name=$1
+                local connection_string=$2
+                
+                echo "Processing cluster: $cluster_name"
+                
+                # Create analytics snapshot table if not exists
+                psql "$connection_string" -c "
+                CREATE TABLE IF NOT EXISTS tenant_analytics_snapshots (
+                  snapshot_time TIMESTAMP NOT NULL,
+                  cluster_name TEXT NOT NULL,
+                  tenant_id TEXT NOT NULL,
+                  database_name TEXT,
+                  username TEXT,
+                  query_hash TEXT,
+                  calls BIGINT,
+                  total_time_ms NUMERIC,
+                  mean_time_ms NUMERIC,
+                  rows_returned BIGINT,
+                  shared_blks_hit BIGINT,
+                  shared_blks_read BIGINT,
+                  temp_blks_written BIGINT,
+                  temp_bytes BIGINT,
+                  created_at TIMESTAMP DEFAULT now()
+                );
+                
+                -- Create index for efficient querying
+                CREATE INDEX IF NOT EXISTS idx_tenant_analytics_snapshots_time_tenant 
+                ON tenant_analytics_snapshots(snapshot_time, tenant_id);
+                
+                -- Create index for cleanup operations
+                CREATE INDEX IF NOT EXISTS idx_tenant_analytics_snapshots_created_at 
+                ON tenant_analytics_snapshots(created_at);
+                "
+                
+                # Insert current pg_stat_statements data with tenant identification
+                psql "$connection_string" -c "
+                INSERT INTO tenant_analytics_snapshots (
+                  snapshot_time, cluster_name, tenant_id, database_name, username,
+                  query_hash, calls, total_time_ms, mean_time_ms, rows_returned,
+                  shared_blks_hit, shared_blks_read, temp_blks_written, temp_bytes
+                )
+                SELECT 
+                  now() as snapshot_time,
+                  '$cluster_name' as cluster_name,
+                  CASE 
+                    WHEN current_schema ~ '^([^_]+)_.*' THEN substring(current_schema from '^([^_]+)_.*')
+                    WHEN datname != 'yugabyte' THEN datname
+                    ELSE 'default'
+                  END as tenant_id,
+                  pd.datname as database_name,
+                  pu.usename as username,
+                  md5(pss.query) as query_hash,
+                  pss.calls,
+                  pss.total_time as total_time_ms,
+                  pss.mean_time as mean_time_ms,
+                  pss.rows as rows_returned,
+                  pss.shared_blks_hit,
+                  pss.shared_blks_read,
+                  pss.temp_blks_written,
+                  pss.temp_bytes
+                FROM pg_stat_statements pss
+                JOIN pg_database pd ON pss.dbid = pd.oid
+                JOIN pg_user pu ON pss.userid = pu.usesysid
+                WHERE pss.calls > 0;
+                "
+                
+                # Create hourly tenant resource summary
+                psql "$connection_string" -c "
+                INSERT INTO tenant_analytics_snapshots (
+                  snapshot_time, cluster_name, tenant_id, database_name, username,
+                  query_hash, calls, total_time_ms, mean_time_ms, rows_returned,
+                  shared_blks_hit, shared_blks_read, temp_blks_written, temp_bytes
+                )
+                SELECT 
+                  date_trunc('hour', now()) as snapshot_time,
+                  '$cluster_name' as cluster_name,
+                  tenant_id,
+                  'SUMMARY' as database_name,
+                  'HOURLY_AGGREGATE' as username,
+                  'SUMMARY' as query_hash,
+                  sum(calls) as calls,
+                  sum(total_time_ms) as total_time_ms,
+                  avg(mean_time_ms) as mean_time_ms,
+                  sum(rows_returned) as rows_returned,
+                  sum(shared_blks_hit) as shared_blks_hit,
+                  sum(shared_blks_read) as shared_blks_read,
+                  sum(temp_blks_written) as temp_blks_written,
+                  sum(temp_bytes) as temp_bytes
+                FROM tenant_analytics_snapshots
+                WHERE snapshot_time >= date_trunc('hour', now())
+                AND cluster_name = '$cluster_name'
+                AND username != 'HOURLY_AGGREGATE'
+                GROUP BY tenant_id;
+                "
+                
+                # Reset pg_stat_statements to keep memory usage low
+                psql "$connection_string" -c "SELECT pg_stat_statements_reset();"
+                
+                # Cleanup old snapshots (keep 30 days)
+                psql "$connection_string" -c "
+                DELETE FROM tenant_analytics_snapshots 
+                WHERE created_at < now() - interval '30 days';
+                "
+                
+                echo "Completed processing cluster: $cluster_name"
+              }
+              
+              # Process each cluster
+              if [ ! -z "$DEV_CONNECTION" ]; then
+                process_cluster "codet-dev-yb" "$DEV_CONNECTION"
+              fi
+              
+              if [ ! -z "$STAGING_CONNECTION" ]; then
+                process_cluster "codet-staging-yb" "$STAGING_CONNECTION"
+              fi
+              
+              if [ ! -z "$PROD_CONNECTION" ]; then
+                process_cluster "codet-prod-yb" "$PROD_CONNECTION"
+              fi
+              
+              echo "Tenant analytics snapshot completed at $(date)"
+              
+              # Push metrics to Prometheus via pushgateway (if available)
+              if command -v curl &> /dev/null; then
+                PUSHGATEWAY_URL="http://prometheus-pushgateway.monitoring.svc.cluster.local:9091"
+                if curl -s "$PUSHGATEWAY_URL" >/dev/null 2>&1; then
+                  echo "# HELP tenant_analytics_snapshot_success Tenant analytics snapshot success indicator" > /tmp/metrics.txt
+                  echo "# TYPE tenant_analytics_snapshot_success gauge" >> /tmp/metrics.txt
+                  echo "tenant_analytics_snapshot_success{job=\"tenant-analytics\"} 1" >> /tmp/metrics.txt
+                  echo "# HELP tenant_analytics_snapshot_timestamp_seconds Tenant analytics snapshot timestamp" >> /tmp/metrics.txt
+                  echo "# TYPE tenant_analytics_snapshot_timestamp_seconds gauge" >> /tmp/metrics.txt
+                  echo "tenant_analytics_snapshot_timestamp_seconds{job=\"tenant-analytics\"} $(date +%s)" >> /tmp/metrics.txt
+                  
+                  curl -X POST "$PUSHGATEWAY_URL/metrics/job/tenant-analytics/instance/$(hostname)" \
+                    --data-binary @/tmp/metrics.txt
+                  echo "Metrics pushed to Pushgateway"
+                fi
+              fi
+            resources:
+              requests:
+                cpu: 100m
+                memory: 128Mi
+              limits:
+                cpu: 500m
+                memory: 512Mi
+          restartPolicy: OnFailure
+
+---
+# CronJob for automated kill-switch (runs every 5 minutes)
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tenant-query-killswitch
+  namespace: monitoring
+  labels:
+    app: yugabytedb
+    component: tenant-governance
+spec:
+  # Run every 5 minutes
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          serviceAccountName: tenant-analytics-sa
+          containers:
+          - name: query-killswitch
+            image: postgres:15-alpine
+            env:
+            - name: DEV_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-secret
+                  key: dev-connection
+            - name: STAGING_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-secret
+                  key: staging-connection
+            - name: PROD_CONNECTION
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-exporter-secret
+                  key: prod-connection
+            - name: MAX_QUERY_DURATION_SECONDS
+              value: "900"  # 15 minutes
+            - name: KILL_SWITCH_ENABLED
+              value: "true"
+            command:
+            - /bin/bash
+            - -c
+            - |
+              #!/bin/bash
+              set -e
+              
+              echo "Starting tenant query kill-switch at $(date)"
+              
+              if [ "$KILL_SWITCH_ENABLED" != "true" ]; then
+                echo "Kill-switch is disabled. Exiting."
+                exit 0
+              fi
+              
+              # Function to kill long-running queries in a cluster
+              kill_long_queries() {
+                local cluster_name=$1
+                local connection_string=$2
+                local max_duration=$3
+                
+                echo "Checking for long-running queries in cluster: $cluster_name"
+                
+                # Find and kill long-running queries
+                killed_queries=$(psql "$connection_string" -t -c "
+                SELECT 
+                  pg_cancel_backend(pid) as cancelled,
+                  CASE 
+                    WHEN current_schema ~ '^([^_]+)_.*' THEN substring(current_schema from '^([^_]+)_.*')
+                    WHEN datname != 'yugabyte' THEN datname
+                    ELSE 'default'
+                  END as tenant_id,
+                  usename,
+                  application_name,
+                  EXTRACT(EPOCH FROM (now() - query_start)) as duration_seconds,
+                  left(query, 100) as query_preview
+                FROM pg_stat_activity 
+                WHERE state = 'active'
+                AND query_start < now() - interval '${max_duration} seconds'
+                AND query NOT LIKE '%pg_stat_activity%'
+                AND query NOT LIKE '%kill_long_queries%'
+                AND pid != pg_backend_pid();
+                ")
+                
+                if [ ! -z "$killed_queries" ] && [ "$killed_queries" != "" ]; then
+                  echo "Killed queries in $cluster_name:"
+                  echo "$killed_queries"
+                  
+                  # Log to analytics table
+                  psql "$connection_string" -c "
+                  INSERT INTO tenant_analytics_snapshots (
+                    snapshot_time, cluster_name, tenant_id, database_name, username,
+                    query_hash, calls, total_time_ms, mean_time_ms, rows_returned,
+                    shared_blks_hit, shared_blks_read, temp_blks_written, temp_bytes
+                  )
+                  SELECT 
+                    now() as snapshot_time,
+                    '$cluster_name' as cluster_name,
+                    'KILLSWITCH' as tenant_id,
+                    'SYSTEM' as database_name,
+                    'AUTOMATED' as username,
+                    'QUERY_KILLED' as query_hash,
+                    1 as calls,
+                    $max_duration * 1000 as total_time_ms,
+                    $max_duration * 1000 as mean_time_ms,
+                    0 as rows_returned,
+                    0 as shared_blks_hit,
+                    0 as shared_blks_read,
+                    0 as temp_blks_written,
+                    0 as temp_bytes;
+                  " || true
+                  
+                  # Send metric to Prometheus
+                  if command -v curl &> /dev/null; then
+                    PUSHGATEWAY_URL="http://prometheus-pushgateway.monitoring.svc.cluster.local:9091"
+                    if curl -s "$PUSHGATEWAY_URL" >/dev/null 2>&1; then
+                      echo "# HELP tenant_queries_killed_total Total number of queries killed by kill-switch" > /tmp/killed_metrics.txt
+                      echo "# TYPE tenant_queries_killed_total counter" >> /tmp/killed_metrics.txt
+                      echo "tenant_queries_killed_total{cluster=\"$cluster_name\",job=\"tenant-killswitch\"} $(echo "$killed_queries" | wc -l)" >> /tmp/killed_metrics.txt
+                      
+                      curl -X POST "$PUSHGATEWAY_URL/metrics/job/tenant-killswitch/cluster/$cluster_name" \
+                        --data-binary @/tmp/killed_metrics.txt || true
+                    fi
+                  fi
+                else
+                  echo "No long-running queries found in $cluster_name"
+                fi
+              }
+              
+              # Process each cluster
+              if [ ! -z "$DEV_CONNECTION" ]; then
+                kill_long_queries "codet-dev-yb" "$DEV_CONNECTION" "$MAX_QUERY_DURATION_SECONDS"
+              fi
+              
+              if [ ! -z "$STAGING_CONNECTION" ]; then
+                kill_long_queries "codet-staging-yb" "$STAGING_CONNECTION" "$MAX_QUERY_DURATION_SECONDS"
+              fi
+              
+              if [ ! -z "$PROD_CONNECTION" ]; then
+                kill_long_queries "codet-prod-yb" "$PROD_CONNECTION" "$MAX_QUERY_DURATION_SECONDS"
+              fi
+              
+              echo "Tenant query kill-switch completed at $(date)"
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 200m
+                memory: 256Mi
+          restartPolicy: OnFailure
+
+---
+# ServiceAccount for tenant analytics operations
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tenant-analytics-sa
+  namespace: monitoring
+
+---
+# ClusterRole for tenant analytics
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tenant-analytics-reader
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+
+---
+# ClusterRoleBinding for tenant analytics
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tenant-analytics-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tenant-analytics-reader
+subjects:
+- kind: ServiceAccount
+  name: tenant-analytics-sa
+  namespace: monitoring
+
+---
+# ConfigMap for tenant management scripts
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-management-scripts
+  namespace: monitoring
+  labels:
+    app: yugabytedb
+    component: tenant-management
+data:
+  create_tenant.sh: |
+    #!/bin/bash
+    # Script to create a new tenant with governance controls
+    
+    TENANT_NAME=$1
+    CONNECTION_LIMIT=${2:-50}
+    CLUSTER=${3:-codet-dev-yb}
+    
+    if [ -z "$TENANT_NAME" ]; then
+      echo "Usage: $0 <tenant_name> [connection_limit] [cluster]"
+      exit 1
+    fi
+    
+    echo "Creating tenant: $TENANT_NAME with connection limit: $CONNECTION_LIMIT in cluster: $CLUSTER"
+    
+    # Get connection string for cluster
+    case $CLUSTER in
+      "codet-dev-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.dev-connection}' | base64 -d)
+        ;;
+      "codet-staging-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.staging-connection}' | base64 -d)
+        ;;
+      "codet-prod-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.prod-connection}' | base64 -d)
+        ;;
+      *)
+        echo "Unknown cluster: $CLUSTER"
+        exit 1
+        ;;
+    esac
+    
+    # Generate secure password
+    TENANT_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
+    
+    # Create tenant database and user
+    psql "$CONNECTION_STRING" -c "
+    -- Create tenant-specific database
+    CREATE DATABASE ${TENANT_NAME}_db WITH CONNECTION LIMIT ${CONNECTION_LIMIT};
+    
+    -- Create tenant-specific role
+    CREATE ROLE ${TENANT_NAME}_user 
+    WITH LOGIN 
+    CONNECTION LIMIT ${CONNECTION_LIMIT}
+    PASSWORD '${TENANT_PASSWORD}';
+    
+    -- Grant database access to tenant role
+    GRANT CONNECT ON DATABASE ${TENANT_NAME}_db TO ${TENANT_NAME}_user;
+    GRANT CREATE ON DATABASE ${TENANT_NAME}_db TO ${TENANT_NAME}_user;
+    "
+    
+    # Switch to tenant database and create schema
+    TENANT_CONNECTION="${CONNECTION_STRING%/*}/${TENANT_NAME}_db"
+    psql "$TENANT_CONNECTION" -c "
+    -- Create tenant-specific schema
+    CREATE SCHEMA ${TENANT_NAME}_schema AUTHORIZATION ${TENANT_NAME}_user;
+    
+    -- Set default schema for tenant
+    ALTER ROLE ${TENANT_NAME}_user SET search_path = ${TENANT_NAME}_schema;
+    
+    -- Grant monitoring access to postgres exporter
+    GRANT USAGE ON SCHEMA ${TENANT_NAME}_schema TO yugabyte;
+    GRANT SELECT ON ALL TABLES IN SCHEMA ${TENANT_NAME}_schema TO yugabyte;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA ${TENANT_NAME}_schema GRANT SELECT ON TABLES TO yugabyte;
+    "
+    
+    # Store tenant credentials in Kubernetes secret
+    kubectl create secret generic "tenant-${TENANT_NAME}-credentials" \
+      --namespace="$CLUSTER" \
+      --from-literal=username="${TENANT_NAME}_user" \
+      --from-literal=password="$TENANT_PASSWORD" \
+      --from-literal=database="${TENANT_NAME}_db" \
+      --from-literal=connection_limit="$CONNECTION_LIMIT"
+    
+    echo "Tenant $TENANT_NAME created successfully!"
+    echo "Database: ${TENANT_NAME}_db"
+    echo "Username: ${TENANT_NAME}_user"
+    echo "Password: $TENANT_PASSWORD"
+    echo "Connection limit: $CONNECTION_LIMIT"
+    echo "Credentials stored in secret: tenant-${TENANT_NAME}-credentials"
+
+  throttle_tenant.sh: |
+    #!/bin/bash
+    # Script to throttle a tenant's resources
+    
+    TENANT_NAME=$1
+    NEW_CONNECTION_LIMIT=$2
+    CLUSTER=${3:-codet-prod-yb}
+    
+    if [ -z "$TENANT_NAME" ] || [ -z "$NEW_CONNECTION_LIMIT" ]; then
+      echo "Usage: $0 <tenant_name> <new_connection_limit> [cluster]"
+      exit 1
+    fi
+    
+    echo "Throttling tenant: $TENANT_NAME to connection limit: $NEW_CONNECTION_LIMIT in cluster: $CLUSTER"
+    
+    # Get connection string for cluster
+    case $CLUSTER in
+      "codet-dev-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.dev-connection}' | base64 -d)
+        ;;
+      "codet-staging-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.staging-connection}' | base64 -d)
+        ;;
+      "codet-prod-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.prod-connection}' | base64 -d)
+        ;;
+      *)
+        echo "Unknown cluster: $CLUSTER"
+        exit 1
+        ;;
+    esac
+    
+    # Update connection limits
+    psql "$CONNECTION_STRING" -c "
+    ALTER DATABASE ${TENANT_NAME}_db CONNECTION LIMIT ${NEW_CONNECTION_LIMIT};
+    ALTER ROLE ${TENANT_NAME}_user CONNECTION LIMIT ${NEW_CONNECTION_LIMIT};
+    "
+    
+    # Kill excess connections if necessary
+    psql "$CONNECTION_STRING" -c "
+    SELECT pg_terminate_backend(pid)
+    FROM pg_stat_activity 
+    WHERE usename = '${TENANT_NAME}_user'
+    AND pid != pg_backend_pid()
+    ORDER BY query_start
+    LIMIT (
+      SELECT GREATEST(0, count(*) - ${NEW_CONNECTION_LIMIT})
+      FROM pg_stat_activity 
+      WHERE usename = '${TENANT_NAME}_user'
+    );
+    "
+    
+    echo "Tenant $TENANT_NAME throttled successfully!"
+    echo "New connection limit: $NEW_CONNECTION_LIMIT"
+
+  kill_tenant_queries.sh: |
+    #!/bin/bash
+    # Script to kill long-running queries for a specific tenant
+    
+    TENANT_NAME=$1
+    MAX_DURATION_SECONDS=${2:-600}
+    CLUSTER=${3:-codet-prod-yb}
+    
+    if [ -z "$TENANT_NAME" ]; then
+      echo "Usage: $0 <tenant_name> [max_duration_seconds] [cluster]"
+      exit 1
+    fi
+    
+    echo "Killing long-running queries for tenant: $TENANT_NAME (max duration: ${MAX_DURATION_SECONDS}s) in cluster: $CLUSTER"
+    
+    # Get connection string for cluster
+    case $CLUSTER in
+      "codet-dev-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.dev-connection}' | base64 -d)
+        ;;
+      "codet-staging-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.staging-connection}' | base64 -d)
+        ;;
+      "codet-prod-yb")
+        CONNECTION_STRING=$(kubectl get secret postgres-exporter-secret -n monitoring -o jsonpath='{.data.prod-connection}' | base64 -d)
+        ;;
+      *)
+        echo "Unknown cluster: $CLUSTER"
+        exit 1
+        ;;
+    esac
+    
+    # Kill long-running queries for the tenant
+    KILLED_QUERIES=$(psql "$CONNECTION_STRING" -t -c "
+    SELECT 
+      pg_cancel_backend(pid) as cancelled,
+      EXTRACT(EPOCH FROM (now() - query_start)) as duration_seconds,
+      left(query, 100) as query_preview
+    FROM pg_stat_activity 
+    WHERE usename = '${TENANT_NAME}_user'
+    AND state = 'active'
+    AND now() - query_start > interval '${MAX_DURATION_SECONDS} seconds'
+    AND query NOT LIKE '%pg_stat_activity%'
+    AND pid != pg_backend_pid();
+    ")
+    
+    if [ ! -z "$KILLED_QUERIES" ] && [ "$KILLED_QUERIES" != "" ]; then
+      echo "Killed queries for tenant $TENANT_NAME:"
+      echo "$KILLED_QUERIES"
+    else
+      echo "No long-running queries found for tenant $TENANT_NAME"
+    fi 

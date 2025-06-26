@@ -54,6 +54,23 @@ spec:
             createAggregateClusterRoles: false
           imagePullSecrets: []
         
+        # Enhanced exporters for comprehensive observability
+        nodeExporter:
+          enabled: true
+          jobLabel: node-exporter
+          serviceMonitor:
+            enabled: true
+            scrapeTimeout: 10s
+            interval: 30s
+        
+        kubeStateMetrics:
+          enabled: true
+          metricLabelsAllowlist:
+            - "persistentvolumes=[*]"
+            - "persistentvolumeclaims=[*]"
+            - "pods=[*]"
+            - "nodes=[*]"
+        
         # Prometheus configuration with enhanced security
         prometheus:
           prometheusSpec:
@@ -144,6 +161,43 @@ spec:
                   - source_labels: [__meta_kubernetes_pod_name]
                     action: replace
                     target_label: kubernetes_pod_name
+
+              # Kubelet volume stats for disk usage monitoring
+              - job_name: 'kubelet-volume-stats'
+                scrape_interval: 60s
+                scrape_timeout: 10s
+                metrics_path: /metrics/resource
+                scheme: https
+                bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+                tls_config:
+                  ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+                  insecure_skip_verify: true
+                kubernetes_sd_configs:
+                  - role: node
+                relabel_configs:
+                  - action: labelmap
+                    regex: __meta_kubernetes_node_label_(.+)
+                  - target_label: __address__
+                    replacement: kubernetes.default.svc:443
+                  - source_labels: [__meta_kubernetes_node_name]
+                    regex: (.+)
+                    target_label: __metrics_path__
+                    replacement: /api/v1/nodes/${1}/proxy/metrics/resource
+
+              # PostgreSQL stats for client activity monitoring
+              - job_name: 'postgres-exporter'
+                scrape_interval: 60s
+                kubernetes_sd_configs:
+                  - role: service
+                    namespaces:
+                      names: ['codet-dev-yb', 'codet-staging-yb', 'codet-prod-yb']
+                relabel_configs:
+                  - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+                    action: keep
+                    regex: true
+                  - source_labels: [__meta_kubernetes_service_label_app]
+                    action: keep
+                    regex: postgres-exporter
         
         # Grafana configuration with security improvements
         grafana:
@@ -203,53 +257,65 @@ spec:
                 type: file
                 disableDeletion: false
                 editable: true
-                updateIntervalSeconds: 30
                 options:
                   path: /var/lib/grafana/dashboards/yugabyte
-          
+              - name: 'kubernetes'
+                orgId: 1
+                folder: 'Kubernetes'
+                type: file
+                disableDeletion: false
+                editable: true
+                options:
+                  path: /var/lib/grafana/dashboards/kubernetes
+              - name: 'infrastructure'
+                orgId: 1
+                folder: 'Infrastructure'
+                type: file
+                disableDeletion: false
+                editable: true
+                options:
+                  path: /var/lib/grafana/dashboards/infrastructure
+
+          # Enhanced dashboard configuration maps
           dashboards:
             yugabyte:
-              yugabyte-overview:
-                gnetId: 12620
+              yugabytedb-cluster-overview:
+                file: dashboards/yugabytedb-cluster-overview.json
+              yugabytedb-client-activity:
+                gnetId: 17945
                 revision: 1
                 datasource: Prometheus
-              yugabyte-cluster:
-                gnetId: 12621  
+            kubernetes:
+              kubernetes-infrastructure:
+                file: dashboards/kubernetes-infrastructure.json
+              persistent-volumes:
+                gnetId: 13646
+                revision: 2
+                datasource: Prometheus
+            infrastructure:
+              node-exporter:
+                gnetId: 1860
+                revision: 37
+                datasource: Prometheus
+              disk-health:
+                gnetId: 10664
                 revision: 1
                 datasource: Prometheus
-              kubernetes-cluster:
-                gnetId: 7249
-                revision: 1
-                datasource: Prometheus
-          
-          # Data sources with secure configuration
-          additionalDataSources:
-            - name: Prometheus
-              type: prometheus
-              url: http://kube-prometheus-stack-prometheus:9090
-              access: proxy
-              isDefault: true
-              editable: false
-        
-        # AlertManager configuration with enhanced security
+
+        # Alertmanager configuration
         alertmanager:
           alertmanagerSpec:
-            # Security context
             securityContext:
               runAsNonRoot: true
               runAsUser: 65534
               fsGroup: 65534
-            
-            # Resource management
             resources:
               requests:
                 cpu: 100m
-                memory: 256Mi
+                memory: 128Mi
               limits:
-                cpu: 500m
-                memory: 512Mi
-            
-            # Persistent storage
+                cpu: 200m
+                memory: 256Mi
             storage:
               volumeClaimTemplate:
                 spec:
@@ -257,228 +323,162 @@ spec:
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:
-                      storage: 10Gi
-          
-          # AlertManager configuration - externalize sensitive data
-          config:
-            global:
-              # FIXED: Replace localhost with proper SMTP service
-              smtp_smarthost: 'smtp-relay.kube-system.svc.cluster.local:587'
-              smtp_from: 'alertmanager@codet.com'
-              smtp_require_tls: true
-            route:
-              group_by: ['alertname', 'cluster', 'service', 'severity']
-              group_wait: 10s
-              group_interval: 10s
-              repeat_interval: 1h
-              receiver: 'default-receiver'
-              routes:
-              - match:
-                  severity: critical
-                receiver: 'pager-critical'
-                group_wait: 0s
-                repeat_interval: 5m
-              - match:
-                  severity: warning
-                receiver: 'slack-warnings'
-                repeat_interval: 12h
-            receivers:
-            - name: 'default-receiver'
-              webhook_configs:
-              # FIXED: Replace localhost with proper webhook service
-              - url: 'http://webhook-service.monitoring.svc.cluster.local:5001/webhook'
-                send_resolved: true
-            - name: 'pager-critical'
-              # Configure with your PagerDuty integration key
-              webhook_configs:
-              - url: 'https://events.pagerduty.com/v2/enqueue'
-                send_resolved: true
-                http_config:
-                  bearer_token_file: /etc/alertmanager/secrets/pagerduty-key
-            - name: 'slack-warnings'
-              # Configure with your Slack webhook URL
-              slack_configs:
-              - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
-                channel: '#alerts'
-                title: 'YugabyteDB Alert - {{ .GroupLabels.alertname }}'
-                text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
-                send_resolved: true
+                      storage: 5Gi
+            # External configuration from ConfigMap
+            configSecret: alertmanager-config
 
-        # Node Exporter with security hardening
-        nodeExporter:
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65534
-        
-        # Kube State Metrics with security hardening
-        kubeStateMetrics:
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 65534
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
 
 ---
-# Custom ServiceMonitor for YugabyteDB with enhanced configuration
+# Service Monitor for YugabyteDB Master nodes
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: yugabyte-monitoring
+  name: yugabytedb-master
   namespace: monitoring
   labels:
     app: yugabytedb
-    release: kube-prometheus-stack
+    component: master
 spec:
   selector:
     matchLabels:
-      app: yugabytedb
+      app: yb-masters
   namespaceSelector:
     matchNames:
-    # FIXED: Updated to current namespace structure
-    - codet-dev-yb
-    - codet-staging-yb  
-    - codet-prod-yb
+      - codet-dev-yb
+      - codet-staging-yb
+      - codet-prod-yb
   endpoints:
-  - port: http-ui
-    path: /prometheus-metrics
-    interval: 30s
-    scrapeTimeout: 10s
-  - port: http-ycql-met
+  - port: ui
     path: /prometheus-metrics
     interval: 30s
     scrapeTimeout: 10s
 
 ---
-# PrometheusRule for YugabyteDB SLOs
+# Service Monitor for YugabyteDB TServer nodes
 apiVersion: monitoring.coreos.com/v1
-kind: PrometheusRule
+kind: ServiceMonitor
 metadata:
-  name: yugabytedb-slos
+  name: yugabytedb-tserver
   namespace: monitoring
   labels:
     app: yugabytedb
-    release: kube-prometheus-stack
+    component: tserver
 spec:
-  groups:
-  - name: yugabytedb.slos
+  selector:
+    matchLabels:
+      app: yb-tservers
+  namespaceSelector:
+    matchNames:
+      - codet-dev-yb
+      - codet-staging-yb
+      - codet-prod-yb
+  endpoints:
+  - port: ui
+    path: /prometheus-metrics
     interval: 30s
-    rules:
-    - alert: YugabyteDBHighLatency
-      expr: histogram_quantile(0.99, rate(rpc_latency_bucket[5m])) > 100
-      for: 2m
-      labels:
-        severity: warning
-      annotations:
-        summary: "YugabyteDB high latency detected"
-        description: "99th percentile latency is {{ $value }}ms"
-    
-    - alert: YugabyteDBNodeDown
-      expr: up{job=~"yugabyte-.*"} == 0
-      for: 1m
-      labels:
-        severity: critical
-      annotations:
-        summary: "YugabyteDB node is down"
-        description: "Node {{ $labels.instance }} has been down for more than 1 minute"
-    
-    - alert: YugabyteDBReplicationLag
-      expr: max(tablet_consensus_log_reader_bytes_behind) > 1048576
-      for: 5m
-      labels:
-        severity: warning
-      annotations:
-        summary: "YugabyteDB replication lag detected"
-        description: "Replication lag is {{ $value }} bytes"
+    scrapeTimeout: 10s
 
 ---
-# NetworkPolicy to secure monitoring namespace
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
+# SMART monitoring DaemonSet for disk health
+apiVersion: apps/v1
+kind: DaemonSet
 metadata:
-  name: monitoring-network-policy
-  namespace: monitoring
-spec:
-  podSelector: {}
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  # Allow incoming connections from ingress controllers
-  - from:
-    - namespaceSelector:
-        matchLabels:
-          name: ingress-nginx
-    ports:
-    - protocol: TCP
-      port: 3000  # Grafana
-  # Allow internal monitoring communication
-  - from:
-    - podSelector: {}
-    ports:
-    - protocol: TCP
-      port: 9090  # Prometheus
-    - protocol: TCP
-      port: 3000  # Grafana
-    - protocol: TCP
-      port: 9093  # AlertManager
-  egress:
-  # Allow outgoing connections to monitored services
-  - to: []
-    ports:
-    - protocol: TCP
-      port: 7000  # YugabyteDB Master
-    - protocol: TCP
-      port: 9000  # YugabyteDB TServer
-    - protocol: TCP
-      port: 443   # HTTPS
-    - protocol: TCP
-      port: 80    # HTTP
-    - protocol: UDP
-      port: 53    # DNS
-
----
-apiVersion: monitoring.coreos.com/v1
-kind: ServiceMonitor
-metadata:
-  name: yugabyte-tserver-monitoring
+  name: smartmon-exporter
   namespace: monitoring
   labels:
-    app: yugabytedb
-    release: kube-prometheus-stack
+    app: smartmon-exporter
 spec:
   selector:
     matchLabels:
-      app: yb-tserver
-  namespaceSelector:
-    matchNames:
-    # FIXED: Updated to current namespace structure
-    - codet-prod-yb
-    - codet-staging-yb
-    - codet-dev-yb  
-  endpoints:
-  - port: http-ysql-met
-    interval: 15s
-    path: /prometheus-metrics
-  - port: http-ycql-met
-    interval: 15s
-    path: /prometheus-metrics
+      app: smartmon-exporter
+  template:
+    metadata:
+      labels:
+        app: smartmon-exporter
+    spec:
+      hostNetwork: true
+      hostPID: true
+      containers:
+      - name: smartmon-exporter
+        image: prometheuscommunity/smartctl-exporter:v0.12.0
+        args:
+          - --smartctl.path=/usr/sbin/smartctl
+          - --smartctl.interval=60s
+          - --web.listen-address=:9633
+        ports:
+        - containerPort: 9633
+          hostPort: 9633
+          name: metrics
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: dev
+          mountPath: /dev
+          readOnly: true
+        - name: smart
+          mountPath: /usr/sbin/smartctl
+          readOnly: true
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 100m
+            memory: 128Mi
+      volumes:
+      - name: dev
+        hostPath:
+          path: /dev
+      - name: smart
+        hostPath:
+          path: /usr/sbin/smartctl
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      - effect: NoExecute
+        operator: Exists
 
 ---
-# Redpanda ServiceMonitor
+# Service for SMART monitoring
+apiVersion: v1
+kind: Service
+metadata:
+  name: smartmon-exporter
+  namespace: monitoring
+  labels:
+    app: smartmon-exporter
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9633"
+spec:
+  type: ClusterIP
+  ports:
+  - port: 9633
+    targetPort: 9633
+    name: metrics
+  selector:
+    app: smartmon-exporter
+
+---
+# Service Monitor for SMART data
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: redpanda-monitoring
+  name: smartmon-exporter
   namespace: monitoring
   labels:
-    app: redpanda
-    release: kube-prometheus-stack
+    app: smartmon-exporter
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: redpanda
-  namespaceSelector:
-    matchNames:
-    - kafka
+      app: smartmon-exporter
   endpoints:
-  - port: prometheus
-    interval: 15s
+  - port: metrics
+    interval: 60s
     path: /metrics 

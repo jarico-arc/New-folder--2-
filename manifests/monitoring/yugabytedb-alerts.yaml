@@ -1,4 +1,6 @@
-# YugabyteDB Multi-Cluster Alert Rules
+# YugabyteDB Multi-Cluster Alert Rules with Enhanced Client Activity Monitoring
+# Enhanced with Tenant-Level Governance Alerts
+
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -106,6 +108,214 @@ spec:
             summary: "YugabyteDB low disk space"
             description: "YugabyteDB persistent volume {{ $labels.persistentvolumeclaim }} in cluster {{ $labels.namespace }} is {{ $value }}% full."
 
+    # Client Activity and Resource Governance Alerts
+    - name: yugabytedb.client.activity
+      interval: 60s
+      rules:
+        - alert: YugabyteDBNoisyClient
+          expr: |
+            (
+              sum by(client_ip, kubernetes_namespace) (
+                rate(pg_stat_statements_total_time_seconds_total{kubernetes_namespace=~"codet-.*"}[5m])
+              ) 
+              / 
+              sum by(kubernetes_namespace) (
+                rate(node_cpu_seconds_total{mode!="idle"}[5m])
+              )
+            ) * 100 > 40
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+            client_ip: "{{ $labels.client_ip }}"
+          annotations:
+            summary: "YugabyteDB client consuming excessive resources"
+            description: "Client {{ $labels.client_ip }} in cluster {{ $labels.kubernetes_namespace }} is consuming {{ $value }}% of cluster CPU resources."
+            runbook_url: "https://docs.yugabyte.com/latest/secure/authorization/"
+
+        - alert: YugabyteDBHighClientConnections
+          expr: |
+            sum by(client_ip, kubernetes_namespace) (
+              ysql_connections{kubernetes_namespace=~"codet-.*"}
+            ) > 100
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+            client_ip: "{{ $labels.client_ip }}"
+          annotations:
+            summary: "YugabyteDB client has excessive connections"
+            description: "Client {{ $labels.client_ip }} in cluster {{ $labels.kubernetes_namespace }} has {{ $value }} active connections."
+
+        - alert: YugabyteDBSlowQueries
+          expr: |
+            sum by(client_ip, kubernetes_namespace) (
+              rate(pg_stat_statements_calls_total{kubernetes_namespace=~"codet-.*"}[5m])
+            ) > 1000
+          for: 5m
+          labels:
+            severity: info
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+            client_ip: "{{ $labels.client_ip }}"
+          annotations:
+            summary: "YugabyteDB client generating high query volume"
+            description: "Client {{ $labels.client_ip }} in cluster {{ $labels.kubernetes_namespace }} is executing {{ $value }} queries per second."
+
+    # NEW: Tenant-Level Governance Alerts
+    - name: yugabytedb.tenant.governance
+      interval: 60s
+      rules:
+        - alert: TenantCPUHog
+          expr: |
+            (
+              sum by(tenant_id, kubernetes_namespace) (
+                rate(pg_stat_statements_by_tenant_total_time[5m])
+              ) 
+              / 
+              sum by(kubernetes_namespace) (
+                rate(node_cpu_seconds_total{mode!="idle"}[5m])
+              )
+            ) > 0.30
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+            tenant_id: "{{ $labels.tenant_id }}"
+          annotations:
+            summary: "Tenant consuming excessive CPU"
+            description: "Tenant {{ $labels.tenant_id }} in cluster {{ $labels.kubernetes_namespace }} is consuming {{ $value | humanizePercentage }} of cluster CPU resources."
+            remediation: "Consider throttling tenant queries or migrating to dedicated cluster"
+
+        - alert: TenantMemorySpill
+          expr: |
+            rate(pg_stat_statements_by_tenant_temp_blks_written[5m]) * 8192 > 1073741824
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+            tenant_id: "{{ $labels.tenant_id }}"
+          annotations:
+            summary: "Tenant causing excessive memory spill"
+            description: "Tenant {{ $labels.tenant_id }} in cluster {{ $labels.kubernetes_namespace }} is writing {{ $value | humanizeBytes }} of temp data per second, indicating memory pressure."
+            remediation: "Review work_mem settings and query optimization for tenant"
+
+        - alert: TenantDiskQuotaExceeded
+          expr: |
+            sum by(tenant_id, kubernetes_namespace) (
+              yb_tablet_rocksdb_sst_files_size_bytes{table_name=~".*"}
+            ) > 10737418240
+          for: 5m
+          labels:
+            severity: critical
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+            tenant_id: "{{ $labels.tenant_id }}"
+          annotations:
+            summary: "Tenant exceeded disk quota"
+            description: "Tenant {{ $labels.tenant_id }} in cluster {{ $labels.kubernetes_namespace }} is using {{ $value | humanizeBytes }} of disk space, exceeding 10GB limit."
+            remediation: "Implement data retention policies or migrate tenant to larger cluster"
+
+        - alert: TenantLongRunningQueries
+          expr: |
+            pg_long_running_queries_long_queries > 5
+          for: 2m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.database }}"
+            service: yugabytedb
+            tenant_id: "{{ $labels.tenant_id }}"
+          annotations:
+            summary: "Tenant has multiple long-running queries"
+            description: "Tenant {{ $labels.tenant_id }} has {{ $value }} queries running longer than 5 minutes. Max duration: {{ $labels.max_duration_seconds }}s."
+            remediation: "Review query performance and consider terminating runaway queries"
+
+        - alert: TenantConnectionLimitApproaching
+          expr: |
+            pg_database_limits_connection_usage_percent > 80
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.database }}"
+            service: yugabytedb
+          annotations:
+            summary: "Database connection limit approaching"
+            description: "Database {{ $labels.database }} is using {{ $value }}% of its connection limit ({{ $labels.connection_limit }})."
+            remediation: "Review connection pooling or increase database connection limit"
+
+        - alert: TenantConnectionLimitExceeded
+          expr: |
+            pg_database_limits_connection_usage_percent >= 100
+          for: 1m
+          labels:
+            severity: critical
+            cluster: "{{ $labels.database }}"
+            service: yugabytedb
+          annotations:
+            summary: "Database connection limit exceeded"
+            description: "Database {{ $labels.database }} has reached its connection limit ({{ $labels.connection_limit }})."
+            remediation: "Immediate action required: kill idle connections or increase limit"
+
+    # Infrastructure and Volume Health Alerts
+    - name: yugabytedb.infrastructure
+      interval: 60s
+      rules:
+        - alert: DiskHealthDegraded
+          expr: |
+            smartctl_device_smart_healthy{kubernetes_namespace=~"codet-.*"} == 0
+          for: 0m
+          labels:
+            severity: critical
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: infrastructure
+          annotations:
+            summary: "Disk health degraded"
+            description: "SMART health check failed for disk {{ $labels.device }} on node {{ $labels.instance }}. Immediate attention required."
+
+        - alert: DiskTemperatureHigh
+          expr: |
+            smartctl_device_temperature_celsius{kubernetes_namespace=~"codet-.*"} > 60
+          for: 10m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: infrastructure
+          annotations:
+            summary: "Disk temperature too high"
+            description: "Disk {{ $labels.device }} on node {{ $labels.instance }} temperature is {{ $value }}°C, above 60°C threshold."
+
+        - alert: VolumeInodeExhaustion
+          expr: |
+            (
+              kubelet_volume_stats_inodes_used{namespace=~"codet-.*", persistentvolumeclaim=~".*yb.*"} 
+              / 
+              kubelet_volume_stats_inodes{namespace=~"codet-.*", persistentvolumeclaim=~".*yb.*"}
+            ) * 100 > 90
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "Volume inode exhaustion"
+            description: "Volume {{ $labels.persistentvolumeclaim }} in cluster {{ $labels.namespace }} is {{ $value }}% full of inodes."
+
+        - alert: HighIOWait
+          expr: |
+            rate(node_cpu_seconds_total{mode="iowait"}[5m]) * 100 > 30
+          for: 5m
+          labels:
+            severity: warning
+            service: infrastructure
+            node: "{{ $labels.instance }}"
+          annotations:
+            summary: "High IO wait on node"
+            description: "Node {{ $labels.instance }} has {{ $value }}% IO wait, indicating storage bottleneck."
+
     - name: yugabytedb.backup
       interval: 300s
       rules:
@@ -131,6 +341,22 @@ spec:
             summary: "YugabyteDB backup overdue"
             description: "YugabyteDB backup in cluster {{ $labels.kubernetes_namespace }} has not completed for more than 8 hours."
 
+        - alert: BackupSizeUnexpected
+          expr: |
+            abs(
+              yugabytedb_backup_size_bytes{kubernetes_namespace=~"codet-.*"} 
+              - 
+              yugabytedb_backup_size_bytes{kubernetes_namespace=~"codet-.*"} offset 1d
+            ) / yugabytedb_backup_size_bytes{kubernetes_namespace=~"codet-.*"} offset 1d > 0.5
+          for: 0m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB backup size changed significantly"
+            description: "Backup size for cluster {{ $labels.kubernetes_namespace }} changed by {{ $value }}% compared to yesterday."
+
     - name: yugabytedb.multi-cluster
       interval: 60s
       rules:
@@ -154,6 +380,22 @@ spec:
           annotations:
             summary: "YugabyteDB replication partition detected"
             description: "YugabyteDB cluster {{ $labels.kubernetes_namespace }} may be experiencing replication partitioning."
+
+        - alert: TabletLeaderImbalance
+          expr: |
+            stddev by (kubernetes_namespace) (
+              count by (instance, kubernetes_namespace) (
+                tablet_raft_is_leader{kubernetes_namespace=~"codet-.*"} == 1
+              )
+            ) > 5
+          for: 15m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.kubernetes_namespace }}"
+            service: yugabytedb
+          annotations:
+            summary: "YugabyteDB tablet leader imbalance"
+            description: "Cluster {{ $labels.kubernetes_namespace }} has uneven tablet leader distribution across nodes."
 
     - name: kubernetes.yugabytedb
       interval: 60s
@@ -191,100 +433,171 @@ spec:
             summary: "YugabyteDB PVC space running out"
             description: "YugabyteDB PVC {{ $labels.persistentvolumeclaim }} in cluster {{ $labels.namespace }} is predicted to run out of space within 24 hours."
 
+        - alert: YugabyteDBResourceQuotaExceeded
+          expr: |
+            (
+              kube_resourcequota_used{namespace=~"codet-.*", resource="requests.cpu"} 
+              / 
+              kube_resourcequota_hard{namespace=~"codet-.*", resource="requests.cpu"}
+            ) > 0.9
+          for: 5m
+          labels:
+            severity: warning
+            cluster: "{{ $labels.namespace }}"
+            service: kubernetes
+          annotations:
+            summary: "Resource quota nearly exceeded"
+            description: "Namespace {{ $labels.namespace }} is using {{ $value }}% of CPU resource quota."
+
 ---
+# Enhanced AlertManager Configuration with Tenant-Specific Routing
 apiVersion: v1
-kind: ConfigMap
+kind: Secret
 metadata:
   name: alertmanager-config
   namespace: monitoring
   labels:
     app: alertmanager
-data:
+type: Opaque
+stringData:
   alertmanager.yml: |
     global:
-      # FIXED: Replace localhost with proper SMTP service
       smtp_smarthost: 'smtp-relay.kube-system.svc.cluster.local:587'
-      smtp_from: 'alertmanager@yourcompany.com'
+      smtp_from: 'alertmanager@codet.com'
       smtp_require_tls: true
     
     route:
-      group_by: ['cluster', 'alertname', 'severity']
-      group_wait: 30s
-      group_interval: 5m
-      repeat_interval: 4h
+      group_by: ['alertname', 'cluster', 'service', 'severity', 'tenant_id']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
       receiver: 'default-receiver'
       routes:
-        # Critical alerts for production
-        - match:
-            severity: critical
-            cluster: codet-prod-yb
-          receiver: 'prod-critical'
-          group_wait: 10s
-          repeat_interval: 1h
-        
-        # Production warnings
-        - match:
-            cluster: codet-prod-yb
-          receiver: 'prod-warnings'
-          
-        # Staging alerts
-        - match:
-            cluster: codet-staging-yb
-          receiver: 'staging-alerts'
-          
-        # Development alerts (low priority)
-        - match:
-            cluster: codet-dev-yb
-          receiver: 'dev-alerts'
+      # Critical alerts for production - immediate response
+      - match:
+          severity: critical
+        match_re:
+          cluster: "codet-prod-yb"
+        receiver: 'pager-critical'
+        group_wait: 0s
+        repeat_interval: 5m
+      
+      # Tenant governance alerts - dedicated team
+      - match_re:
+          alertname: "Tenant.*|TenantCPUHog|TenantMemorySpill|TenantDiskQuotaExceeded"
+        receiver: 'tenant-governance-team'
+        repeat_interval: 30m
+      
+      # Client activity alerts - governance team
+      - match_re:
+          alertname: "YugabyteDBNoisyClient|YugabyteDBHighClientConnections"
+        receiver: 'governance-team'
+        repeat_interval: 30m
+      
+      # Infrastructure alerts - ops team
+      - match_re:
+          alertname: "DiskHealth.*|HighIOWait|VolumeInodeExhaustion"
+        receiver: 'infrastructure-team'
+        repeat_interval: 2h
+      
+      # General warnings
+      - match:
+          severity: warning
+        receiver: 'slack-warnings'
+        repeat_interval: 12h
     
     receivers:
-      - name: 'default-receiver'
-        webhook_configs:
-          - url: 'http://webhook-service:9093/webhook'
-            send_resolved: true
-      
-      - name: 'prod-critical'
-        email_configs:
-          - to: 'oncall-team@yourcompany.com'
-            subject: '🚨 CRITICAL: {{ .GroupLabels.cluster }} Alert'
-            body: |
-              Alert: {{ range .Alerts }}{{ .Annotations.summary }}
-              Description: {{ .Annotations.description }}
-              Cluster: {{ .Labels.cluster }}
-              Severity: {{ .Labels.severity }}
-              {{ end }}
-        slack_configs:
-          - api_url: 'YOUR_SLACK_WEBHOOK_URL'
-            channel: '#alerts-critical'
-            title: '🚨 Production Critical Alert'
-            text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
-      
-      - name: 'prod-warnings'
-        email_configs:
-          - to: 'devops-team@yourcompany.com'
-            subject: '⚠️ WARNING: {{ .GroupLabels.cluster }} Alert'
-            body: |
-              Alert: {{ range .Alerts }}{{ .Annotations.summary }}
-              Description: {{ .Annotations.description }}
-              Cluster: {{ .Labels.cluster }}
-              {{ end }}
-      
-      - name: 'staging-alerts'
-        slack_configs:
-          - api_url: 'YOUR_SLACK_WEBHOOK_URL'
-            channel: '#alerts-staging'
-            title: 'Staging Environment Alert'
-            text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
-      
-      - name: 'dev-alerts'
-        webhook_configs:
-          - url: 'http://dev-webhook:9093/webhook'
-            send_resolved: false
+    - name: 'default-receiver'
+      webhook_configs:
+      - url: 'http://webhook-service.monitoring.svc.cluster.local:5001/webhook'
+        send_resolved: true
     
-    inhibit_rules:
-      # Inhibit lower severity alerts when critical alerts are firing
-      - source_match:
-          severity: 'critical'
-        target_match:
-          severity: 'warning'
-        equal: ['cluster', 'service'] 
+    - name: 'pager-critical'
+      # Configure with your PagerDuty integration key
+      webhook_configs:
+      - url: 'https://events.pagerduty.com/v2/enqueue'
+        send_resolved: true
+        http_config:
+          bearer_token_file: /etc/alertmanager/secrets/pagerduty-key
+    
+    - name: 'tenant-governance-team'
+      email_configs:
+      - to: 'tenant-governance@codet.com'
+        subject: 'Tenant Governance Alert - {{ .GroupLabels.alertname }}'
+        body: |
+          Alert: {{ .GroupLabels.alertname }}
+          Cluster: {{ .GroupLabels.cluster }}
+          Tenant: {{ .GroupLabels.tenant_id }}
+          
+          {{ range .Alerts }}
+          Summary: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Remediation: {{ .Annotations.remediation }}
+          {{ end }}
+          
+          Immediate Actions Available:
+          1. Reduce tenant connection limits
+          2. Throttle tenant queries via work_mem
+          3. Move tenant to dedicated cluster
+          4. Kill runaway queries
+      slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        channel: '#tenant-governance'
+        title: 'Tenant Alert - {{ .GroupLabels.tenant_id }}'
+        text: |
+          *Tenant:* {{ .GroupLabels.tenant_id }}
+          *Cluster:* {{ .GroupLabels.cluster }}
+          *Alert:* {{ .GroupLabels.alertname }}
+          
+          {{ range .Alerts }}
+          *Issue:* {{ .Annotations.summary }}
+          *Remediation:* {{ .Annotations.remediation }}
+          {{ end }}
+        send_resolved: true
+    
+    - name: 'governance-team'
+      email_configs:
+      - to: 'governance@codet.com'
+        subject: 'Client Resource Governance Alert - {{ .GroupLabels.alertname }}'
+        body: |
+          Alert: {{ .GroupLabels.alertname }}
+          Cluster: {{ .GroupLabels.cluster }}
+          Client: {{ .GroupLabels.client_ip }}
+          
+          {{ range .Alerts }}
+          Summary: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          {{ end }}
+          
+          Recommended Actions:
+          1. Check client {{ .GroupLabels.client_ip }} query patterns
+          2. Consider connection limits or resource quotas
+          3. Review with client team for optimization
+    
+    - name: 'infrastructure-team'
+      email_configs:
+      - to: 'infrastructure@codet.com'
+        subject: 'Infrastructure Alert - {{ .GroupLabels.alertname }}'
+        body: |
+          Alert: {{ .GroupLabels.alertname }}
+          Node/Cluster: {{ .GroupLabels.instance }}{{ .GroupLabels.cluster }}
+          
+          {{ range .Alerts }}
+          Description: {{ .Annotations.description }}
+          {{ end }}
+    
+    - name: 'slack-warnings'
+      slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-webhook-url
+        channel: '#yugabytedb-alerts'
+        title: 'YugabyteDB Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          *Cluster:* {{ .GroupLabels.cluster }}
+          *Severity:* {{ .GroupLabels.severity }}
+          {{ if .GroupLabels.tenant_id }}*Tenant:* {{ .GroupLabels.tenant_id }}{{ end }}
+          
+          {{ range .Alerts }}
+          *Summary:* {{ .Annotations.summary }}
+          *Details:* {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true 

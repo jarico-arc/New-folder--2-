@@ -2,42 +2,42 @@
 # Environment: staging
 # Region: us-central1, Zone: us-central1-b
 
-isMultiAz: true
+isMultiAz: false
 AZ: us-central1-b
 
-# Multi-cluster master addresses for all 3 environments
-masterAddresses: "yb-master-0.yb-masters.codet-dev-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-staging-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-prod-yb.svc.cluster.local:7100"
+# Single-cluster master addresses (fixing DNS issue)
+masterAddresses: "yb-master-0.yb-masters.codet-staging-yb.svc.cluster.local:7100"
 
 # Storage configuration
 storage:
   master:
-    storageClass: "ssd-us-central1-b"
+    storageClass: "standard-rwo"
     size: "200Gi"
   tserver:
-    storageClass: "ssd-us-central1-b"
+    storageClass: "standard-rwo"
     size: "200Gi"
 
 # Replica configuration
 replicas:
   master: 1
   tserver: 1
-  totalMasters: 3
+  totalMasters: 1
 
-# Resource configuration for staging
+# Resource configuration
 resource:
   master:
     requests:
-      cpu: "1500m"
-      memory: "3Gi"
+      cpu: "1000m"
+      memory: "2Gi"
     limits:
       cpu: "1500m"
       memory: "3Gi"
   tserver:
     requests:
-      cpu: "3000m"
-      memory: "6Gi"
+      cpu: "2000m"
+      memory: "4Gi"
     limits:
-      cpu: "3000m"
+      cpu: "2500m"
       memory: "6Gi"
 
 # Global flags for multi-cluster setup
@@ -50,12 +50,6 @@ gflags:
     raft_heartbeat_interval_ms: 1000
     enable_ysql: true
     default_memory_limit_to_ram_ratio: 0.85
-    # Multi-cluster specific flags
-    use_private_ip: "cloud"
-    rpc_bind_addresses: "0.0.0.0:7100"
-    server_broadcast_addresses: "0.0.0.0:7000"
-    # Enhanced logging for staging
-    log_min_seconds_to_retain: 86400
   tserver:
     placement_cloud: "gke"
     placement_region: "us-central1"
@@ -64,53 +58,62 @@ gflags:
     raft_heartbeat_interval_ms: 1000
     enable_ysql: true
     default_memory_limit_to_ram_ratio: 0.85
-    # CDC configuration for multi-cluster
+    # CDC configuration
     cdc_max_stream_intent_records: 10000
-    # Multi-cluster specific flags
-    use_private_ip: "cloud"
-    rpc_bind_addresses: "0.0.0.0:9100"
-    server_broadcast_addresses: "0.0.0.0:9000"
-    pgsql_proxy_bind_address: "0.0.0.0:5433"
-    cql_proxy_bind_address: "0.0.0.0:9042"
-    redis_proxy_bind_address: "0.0.0.0:6379"
-    # Enhanced logging for staging
-    log_min_seconds_to_retain: 86400
 
-# Security configuration (enhanced for staging)
+# Security configuration
 auth:
-  enabled: true
-  useSecretFile: true
+  enabled: false
+  useSecretFile: false
 
 tls:
-  # SECURITY FIX: TLS enabled for staging environment
-  enabled: true
-  nodeToNode: true
-  clientToServer: true
-  # Auto-generate certificates for staging
-  certManager:
-    enabled: true
+  enabled: false
+  nodeToNode: false
+  clientToServer: false
 
-# Service configuration with private load balancers
+# Service configuration
 services:
   master:
     type: LoadBalancer
     annotations:
-      cloud.google.com/load-balancer-type: "Internal"
-      networking.gke.io/load-balancer-type: "Internal"
-    ui:
-      type: LoadBalancer
-      annotations:
-        cloud.google.com/load-balancer-type: "Internal"
-        networking.gke.io/load-balancer-type: "Internal"
+      cloud.google.com/load-balancer-type: "External"
+    loadBalancerSourceRanges:
+      - "0.0.0.0/0"
   tserver:
     type: LoadBalancer
     annotations:
-      cloud.google.com/load-balancer-type: "Internal"
-      networking.gke.io/load-balancer-type: "Internal"
+      cloud.google.com/load-balancer-type: "External"
+    loadBalancerSourceRanges:
+      - "0.0.0.0/0"
+  yb-master-ui:
+    type: LoadBalancer
+    annotations:
+      cloud.google.com/load-balancer-type: "External"
+    loadBalancerSourceRanges:
+      - "0.0.0.0/0"
+  yb-tserver-service:
+    type: LoadBalancer
+    annotations:
+      cloud.google.com/load-balancer-type: "External"
+    loadBalancerSourceRanges:
+      - "0.0.0.0/0"
+  yugabyted-ui-service:
+    type: LoadBalancer
+    annotations:
+      cloud.google.com/load-balancer-type: "External"
+    loadBalancerSourceRanges:
+      - "0.0.0.0/0"
 
 # Pod configuration
 pod:
   master:
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
     tolerations:
       - key: "environment"
         operator: "Equal"
@@ -121,18 +124,14 @@ pod:
     annotations:
       cluster.name: "codet-staging-yb"
       environment: "staging"
-    securityContext:
-      runAsNonRoot: true
-      runAsUser: 1000
-      fsGroup: 1000
-    resources:
-      requests:
-        cpu: "1500m"
-        memory: "3Gi"
-      limits:
-        cpu: "1500m"
-        memory: "3Gi"
   tserver:
+    securityContext:
+      allowPrivilegeEscalation: false
+      runAsNonRoot: true
+      capabilities:
+        drop: ["ALL"]
+      seccompProfile:
+        type: RuntimeDefault
     tolerations:
       - key: "environment"
         operator: "Equal"
@@ -143,17 +142,6 @@ pod:
     annotations:
       cluster.name: "codet-staging-yb"
       environment: "staging"
-    securityContext:
-      runAsNonRoot: true
-      runAsUser: 1000
-      fsGroup: 1000
-    resources:
-      requests:
-        cpu: "3000m"
-        memory: "6Gi"
-      limits:
-        cpu: "3000m"
-        memory: "6Gi"
 
 # Network policy
 networkPolicy:
@@ -161,99 +149,11 @@ networkPolicy:
 
 # Monitoring
 serviceMonitor:
-  enabled: true
-  namespace: monitoring
+  enabled: false
+
+# Environment-specific configurations
 
 # Staging specific settings  
-domainName: codet-staging-yb.local
+# domainName: codet-staging-yb.local  # Removed - causing DNS issues
 image:
   tag: "2.25.2"
-
-# Multi-cluster universe configuration
-universeConfig:
-  name: "codet-multi-cluster"
-  placement:
-    numReplicas: 3
-    cloudList:
-      - cloud: "gke"
-        regionList:
-          - region: "us-west1"
-            zones:
-              - zone: "us-west1-b"
-                numNodes: 1
-          - region: "us-central1" 
-            zones:
-              - zone: "us-central1-b"
-                numNodes: 1
-          - region: "us-east1"
-            zones:
-              - zone: "us-east1-b"
-                numNodes: 1
-
-# Staging specific resource limits
-limits:
-  master:
-    cpu: "1500m"
-    memory: "3Gi"
-  tserver:
-    cpu: "3000m"
-    memory: "6Gi"
-
-# Backup configuration (enabled for staging)
-backups:
-  enabled: true
-  schedule: "0 3 * * *"  # Daily at 3 AM
-  retention: "7d"
-  location: "gs://codet-staging-yb-backups"
-
-# Persistent volume configuration
-persistentVolume:
-  master:
-    storageClass: "ssd-us-central1-b"
-    size: "200Gi"
-    annotations:
-      volume.beta.kubernetes.io/storage-class: "ssd-us-central1-b"
-  tserver:
-    storageClass: "ssd-us-central1-b"
-    size: "200Gi"
-    annotations:
-      volume.beta.kubernetes.io/storage-class: "ssd-us-central1-b"
-
-# Health checking configuration
-healthCheck:
-  enabled: true
-  initialDelaySeconds: 60
-  periodSeconds: 30
-  timeoutSeconds: 10
-  failureThreshold: 3
-
-# Performance and reliability settings
-performance:
-  # Staging-specific performance settings
-  memtable_flush_size_mb: 256
-  sst_files_soft_limit: 64
-  sst_files_hard_limit: 96
-  rocksdb_compact_flush_rate_limit_bytes_per_sec: 256MB
-  
-reliability:
-  # Staging-specific reliability settings
-  enable_automatic_tablet_splitting: true
-  tablet_split_size_threshold_bytes: 10GB
-  
-# Environment-specific configurations
-environment:
-  name: "staging"
-  cluster: "codet-staging-yb"
-  region: "us-central1"
-  zone: "us-central1-b"
-  
-# Logging configuration
-logging:
-  level: "INFO"
-  retentionDays: 7
-  
-# Metrics and observability
-metrics:
-  enabled: true
-  interval: "30s"
-  retention: "7d" 

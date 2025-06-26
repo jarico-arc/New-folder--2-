@@ -1,0 +1,480 @@
+# Kubernetes Governance and Control Resources
+# Implements resource quotas, limits, and network policies for YugabyteDB clusters
+
+---
+# Resource Quota for Development Environment
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: codet-dev-yb-quota
+  namespace: codet-dev-yb
+  labels:
+    environment: development
+    governance: resource-control
+spec:
+  hard:
+    # CPU and Memory limits
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    
+    # Storage limits
+    requests.storage: 200Gi
+    persistentvolumeclaims: "5"
+    
+    # Pod and service limits
+    pods: "10"
+    services: "5"
+    services.loadbalancers: "2"
+    
+    # Secrets and ConfigMaps
+    secrets: "10"
+    configmaps: "10"
+
+---
+# Resource Quota for Staging Environment
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: codet-staging-yb-quota
+  namespace: codet-staging-yb
+  labels:
+    environment: staging
+    governance: resource-control
+spec:
+  hard:
+    # CPU and Memory limits
+    requests.cpu: "6"
+    requests.memory: 12Gi
+    limits.cpu: "12"
+    limits.memory: 24Gi
+    
+    # Storage limits
+    requests.storage: 500Gi
+    persistentvolumeclaims: "10"
+    
+    # Pod and service limits
+    pods: "15"
+    services: "8"
+    services.loadbalancers: "3"
+    
+    # Secrets and ConfigMaps
+    secrets: "15"
+    configmaps: "15"
+
+---
+# Resource Quota for Production Environment
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: codet-prod-yb-quota
+  namespace: codet-prod-yb
+  labels:
+    environment: production
+    governance: resource-control
+spec:
+  hard:
+    # CPU and Memory limits
+    requests.cpu: "12"
+    requests.memory: 24Gi
+    limits.cpu: "24"
+    limits.memory: 48Gi
+    
+    # Storage limits
+    requests.storage: 2Ti
+    persistentvolumeclaims: "20"
+    
+    # Pod and service limits
+    pods: "25"
+    services: "15"
+    services.loadbalancers: "5"
+    
+    # Secrets and ConfigMaps
+    secrets: "25"
+    configmaps: "25"
+
+---
+# Limit Range for Development Environment
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: codet-dev-yb-limits
+  namespace: codet-dev-yb
+  labels:
+    environment: development
+    governance: resource-control
+spec:
+  limits:
+  # Container limits
+  - type: Container
+    default:
+      cpu: 500m
+      memory: 1Gi
+    defaultRequest:
+      cpu: 100m
+      memory: 256Mi
+    max:
+      cpu: "2"
+      memory: 4Gi
+    min:
+      cpu: 50m
+      memory: 128Mi
+  
+  # Pod limits
+  - type: Pod
+    max:
+      cpu: "4"
+      memory: 8Gi
+    min:
+      cpu: 100m
+      memory: 256Mi
+  
+  # PVC limits
+  - type: PersistentVolumeClaim
+    max:
+      storage: 100Gi
+    min:
+      storage: 1Gi
+
+---
+# Limit Range for Staging Environment
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: codet-staging-yb-limits
+  namespace: codet-staging-yb
+  labels:
+    environment: staging
+    governance: resource-control
+spec:
+  limits:
+  # Container limits
+  - type: Container
+    default:
+      cpu: "1"
+      memory: 2Gi
+    defaultRequest:
+      cpu: 200m
+      memory: 512Mi
+    max:
+      cpu: "3"
+      memory: 6Gi
+    min:
+      cpu: 100m
+      memory: 256Mi
+  
+  # Pod limits
+  - type: Pod
+    max:
+      cpu: "6"
+      memory: 12Gi
+    min:
+      cpu: 200m
+      memory: 512Mi
+  
+  # PVC limits
+  - type: PersistentVolumeClaim
+    max:
+      storage: 250Gi
+    min:
+      storage: 10Gi
+
+---
+# Limit Range for Production Environment
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: codet-prod-yb-limits
+  namespace: codet-prod-yb
+  labels:
+    environment: production
+    governance: resource-control
+spec:
+  limits:
+  # Container limits
+  - type: Container
+    default:
+      cpu: "2"
+      memory: 4Gi
+    defaultRequest:
+      cpu: 500m
+      memory: 1Gi
+    max:
+      cpu: "4"
+      memory: 8Gi
+    min:
+      cpu: 200m
+      memory: 512Mi
+  
+  # Pod limits
+  - type: Pod
+    max:
+      cpu: "12"
+      memory: 24Gi
+    min:
+      cpu: 500m
+      memory: 1Gi
+  
+  # PVC limits
+  - type: PersistentVolumeClaim
+    max:
+      storage: 1Ti
+    min:
+      storage: 50Gi
+
+---
+# Network Policy for Development - Allow all for development ease
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-dev-yb-netpol
+  namespace: codet-dev-yb
+  labels:
+    environment: development
+    governance: network-control
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - {}  # Allow all ingress for development
+  egress:
+  - {}  # Allow all egress for development
+
+---
+# Network Policy for Staging - Basic restrictions
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-staging-yb-netpol
+  namespace: codet-staging-yb
+  labels:
+    environment: staging
+    governance: network-control
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from monitoring namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  # Allow from same namespace
+  - from:
+    - podSelector: {}
+  # Allow from specific client namespaces
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          client-access: "allowed"
+    ports:
+    - protocol: TCP
+      port: 5433  # YSQL
+    - protocol: TCP
+      port: 9042  # YCQL
+  
+  egress:
+  # DNS resolution
+  - ports:
+    - protocol: UDP
+      port: 53
+  # Allow to other YugabyteDB clusters (cross-region replication)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          app: yugabytedb
+    ports:
+    - protocol: TCP
+      port: 7100  # Master RPC
+    - protocol: TCP
+      port: 9100  # TServer RPC
+  # Allow to monitoring
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+
+---
+# Network Policy for Production - Strict restrictions
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: codet-prod-yb-netpol
+  namespace: codet-prod-yb
+  labels:
+    environment: production
+    governance: network-control
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow from monitoring namespace only
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  # Allow from same namespace (inter-cluster communication)
+  - from:
+    - podSelector: {}
+  # Allow from authorized client applications only
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          prod-access: "authorized"
+    - podSelector:
+        matchLabels:
+          yugabytedb-client: "authorized"
+    ports:
+    - protocol: TCP
+      port: 5433  # YSQL
+    - protocol: TCP
+      port: 9042  # YCQL
+  
+  egress:
+  # DNS resolution only to kube-dns
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    - podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow to other YugabyteDB clusters (cross-region replication)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          app: yugabytedb
+    ports:
+    - protocol: TCP
+      port: 7100  # Master RPC
+    - protocol: TCP
+      port: 9100  # TServer RPC
+  # Allow to monitoring (metrics scraping)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+  # Allow to backup storage (if external)
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # HTTPS for cloud storage
+
+---
+# Pod Disruption Budget for Production
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-prod-yb-master-pdb
+  namespace: codet-prod-yb
+  labels:
+    environment: production
+    governance: availability-control
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-master
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-prod-yb-tserver-pdb
+  namespace: codet-prod-yb
+  labels:
+    environment: production
+    governance: availability-control
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-tserver
+
+---
+# Pod Disruption Budget for Staging
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-staging-yb-master-pdb
+  namespace: codet-staging-yb
+  labels:
+    environment: staging
+    governance: availability-control
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-master
+
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: codet-staging-yb-tserver-pdb
+  namespace: codet-staging-yb
+  labels:
+    environment: staging
+    governance: availability-control
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: yb-tserver
+
+---
+# Storage Classes for different workload tiers
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ssd-high-iops
+  labels:
+    governance: storage-control
+    tier: high-performance
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: pd-ssd
+  replication-type: regional-pd
+  zones: us-east1-b,us-east1-c,us-east1-d
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: hdd-capacity
+  labels:
+    governance: storage-control
+    tier: capacity
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: pd-standard
+  replication-type: regional-pd
+allowVolumeExpansion: true
+volumeBindingMode: WaitForFirstConsumer
+
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ssd-monitoring
+  labels:
+    governance: storage-control
+    tier: monitoring
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: pd-ssd
+  replication-type: none
+allowVolumeExpansion: true
+volumeBindingMode: Immediate 
