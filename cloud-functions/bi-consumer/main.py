@@ -12,7 +12,7 @@ import json
 import base64
 import traceback
 from datetime import datetime
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union, Tuple
 from google.cloud import bigquery, secretmanager
 from google.oauth2 import service_account
 from kafka import KafkaConsumer
@@ -28,22 +28,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Constants for configuration
+DEFAULT_KAFKA_SERVERS = 'redpanda.codet-prod.svc.cluster.local:9092'
+DEFAULT_KAFKA_TOPIC_PATTERN = 'codet.prod.*'
+DEFAULT_KAFKA_GROUP_ID = 'marketing-bi-consumer'
+DEFAULT_BIGQUERY_DATASET = 'marketing_events'
+DEFAULT_BIGQUERY_TABLE = 'user_events'
+DEFAULT_ENVIRONMENT = 'production'
+DEFAULT_MAX_BATCH_SIZE = 50
+DEFAULT_CONSUMER_TIMEOUT_MS = 10000
+DEFAULT_MAX_POLL_RECORDS = 100
+DEFAULT_CLOUD_FUNCTION_TIMEOUT_MS = 540000  # 9 minutes (Cloud Functions have 10min max)
+
 # Configuration from environment with secure defaults
-KAFKA_BOOTSTRAP_SERVERS = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', 'redpanda.codet-prod.svc.cluster.local:9092')
-KAFKA_TOPIC_PATTERN = os.environ.get('KAFKA_TOPIC_PATTERN', 'codet.prod.*')
-KAFKA_GROUP_ID = os.environ.get('KAFKA_GROUP_ID', 'marketing-bi-consumer')
-BIGQUERY_DATASET = os.environ.get('BIGQUERY_DATASET', 'marketing_events')
-BIGQUERY_TABLE = os.environ.get('BIGQUERY_TABLE', 'user_events')
-PROJECT_ID = os.environ.get('GCP_PROJECT')
-ENVIRONMENT = os.environ.get('ENVIRONMENT', 'production')
+KAFKA_BOOTSTRAP_SERVERS = os.environ.get('KAFKA_BOOTSTRAP_SERVERS', DEFAULT_KAFKA_SERVERS)
+KAFKA_TOPIC_PATTERN = os.environ.get('KAFKA_TOPIC_PATTERN', DEFAULT_KAFKA_TOPIC_PATTERN)
+KAFKA_GROUP_ID = os.environ.get('KAFKA_GROUP_ID', DEFAULT_KAFKA_GROUP_ID)
+BIGQUERY_DATASET = os.environ.get('BIGQUERY_DATASET', DEFAULT_BIGQUERY_DATASET)
+BIGQUERY_TABLE = os.environ.get('BIGQUERY_TABLE', DEFAULT_BIGQUERY_TABLE)
+PROJECT_ID = os.environ.get('GCP_PROJECT', os.environ.get('GOOGLE_CLOUD_PROJECT', ''))
+ENVIRONMENT = os.environ.get('ENVIRONMENT', DEFAULT_ENVIRONMENT)
 
 # Security: Use Secret Manager for sensitive configuration
 SECRET_CLIENT = secretmanager.SecretManagerServiceClient()
 
-# Constants
-MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', '50'))
-CONSUMER_TIMEOUT_MS = int(os.environ.get('CONSUMER_TIMEOUT_MS', '10000'))
-MAX_POLL_RECORDS = int(os.environ.get('MAX_POLL_RECORDS', '100'))
+# Constants with proper defaults
+MAX_BATCH_SIZE = int(os.environ.get('MAX_BATCH_SIZE', str(DEFAULT_MAX_BATCH_SIZE)))
+CONSUMER_TIMEOUT_MS = int(os.environ.get('CONSUMER_TIMEOUT_MS', str(DEFAULT_CONSUMER_TIMEOUT_MS)))
+MAX_POLL_RECORDS = int(os.environ.get('MAX_POLL_RECORDS', str(DEFAULT_MAX_POLL_RECORDS)))
+CLOUD_FUNCTION_TIMEOUT_MS = int(os.environ.get('CLOUD_FUNCTION_TIMEOUT_MS', str(DEFAULT_CLOUD_FUNCTION_TIMEOUT_MS)))
 
 def correlation_logger(func):
     """Decorator to add correlation ID to logs"""
@@ -72,6 +85,10 @@ def correlation_logger(func):
 
 def get_secret(secret_name: str) -> Optional[str]:
     """Securely retrieve secrets from Google Secret Manager"""
+    if not PROJECT_ID:
+        logger.warning("No PROJECT_ID available for secret retrieval")
+        return None
+        
     try:
         name = f"projects/{PROJECT_ID}/secrets/{secret_name}/versions/latest"
         response = SECRET_CLIENT.access_secret_version(request={"name": name})
@@ -82,23 +99,22 @@ def get_secret(secret_name: str) -> Optional[str]:
 
 def validate_environment() -> bool:
     """Validate required environment variables and dependencies"""
-    required_vars = ['GCP_PROJECT', 'KAFKA_BOOTSTRAP_SERVERS']
-    missing_vars = [var for var in required_vars if not os.environ.get(var)]
+    required_vars = ['KAFKA_BOOTSTRAP_SERVERS']
+    missing_vars = [var for var in required_vars if not os.environ.get(var) and not globals().get(var.upper())]
     
     if missing_vars:
         logger.error(f"Missing required environment variables: {missing_vars}")
         return False
     
     if not PROJECT_ID:
-        logger.error("GCP_PROJECT environment variable is required")
-        return False
+        logger.warning("GCP_PROJECT not set - some features may not work")
     
     return True
 
 def create_bigquery_table_if_not_exists(bq_client: bigquery.Client) -> bool:
     """Create BigQuery table if it doesn't exist with proper error handling."""
     try:
-        dataset_id = f"{PROJECT_ID}.{BIGQUERY_DATASET}"
+        dataset_id = f"{PROJECT_ID}.{BIGQUERY_DATASET}" if PROJECT_ID else BIGQUERY_DATASET
         table_id = f"{dataset_id}.{BIGQUERY_TABLE}"
         
         # Create dataset if not exists
@@ -196,7 +212,7 @@ def process_event(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             'event_timestamp': event_timestamp,
             'user_id': str(payload.get('user_id', payload.get('id', ''))),
             'user_email': payload.get('email', ''),
-            'event_data': json.dumps(payload),
+            'event_data': json.dumps(payload) if payload else '{}',
             'source_table': source_table,
             'operation': operation,
             'ingested_at': datetime.utcnow(),
@@ -246,16 +262,11 @@ def insert_rows_to_bigquery(bq_client: bigquery.Client, rows: List[Dict[str, Any
     if not rows:
         return True
     
-    table_id = f"{PROJECT_ID}.{BIGQUERY_DATASET}.{BIGQUERY_TABLE}"
+    table_id = f"{PROJECT_ID}.{BIGQUERY_DATASET}.{BIGQUERY_TABLE}" if PROJECT_ID else f"{BIGQUERY_DATASET}.{BIGQUERY_TABLE}"
     
     try:
-        # Insert with job configuration for better error handling
-        job_config = bigquery.LoadJobConfig()
-        job_config.source_format = bigquery.SourceFormat.NEWLINE_DELIMITED_JSON
-        job_config.write_disposition = bigquery.WriteDisposition.WRITE_APPEND
-        job_config.ignore_unknown_values = True
-        
-        errors = bq_client.insert_rows_json(table_id, rows, job_config=job_config)
+        # Use streaming insert (not load job) for real-time data
+        errors = bq_client.insert_rows_json(table_id, rows)
         
         if errors:
             logger.error(f"BigQuery insert errors: {errors}")
@@ -269,11 +280,13 @@ def insert_rows_to_bigquery(bq_client: bigquery.Client, rows: List[Dict[str, Any
         return False
 
 @correlation_logger
-def consume_events(request):
+def consume_events(request) -> Tuple[Dict[str, Any], int]:
     """
     Cloud Function entry point.
     Consumes events from Kafka and writes to BigQuery.
     """
+    start_time = datetime.utcnow()
+    
     # Validate environment before starting
     if not validate_environment():
         return {'error': 'Environment validation failed'}, 500
@@ -310,8 +323,14 @@ def consume_events(request):
         consumer.subscribe(pattern=KAFKA_TOPIC_PATTERN)
         logger.info(f"Subscribed to topics matching: {KAFKA_TOPIC_PATTERN}")
         
-        # Consume messages with timeout
+        # Consume messages with Cloud Function timeout awareness
         for message in consumer:
+            # Check if we're approaching Cloud Function timeout
+            elapsed_time = (datetime.utcnow() - start_time).total_seconds() * 1000
+            if elapsed_time > CLOUD_FUNCTION_TIMEOUT_MS - 30000:  # Leave 30s buffer
+                logger.info("Approaching Cloud Function timeout, finishing processing")
+                break
+                
             try:
                 # Process event with validation
                 row = process_event(message.value)
@@ -367,24 +386,27 @@ def consume_events(request):
         'events_processed': processed_count,
         'events_failed': error_count,
         'environment': ENVIRONMENT,
+        'execution_time_ms': int((datetime.utcnow() - start_time).total_seconds() * 1000),
         'timestamp': datetime.utcnow().isoformat()
     }, 200
 
 # Health check endpoint
-def health_check(request):
+def health_check(request) -> Tuple[Dict[str, Any], int]:
     """Health check endpoint for monitoring"""
     try:
         # Basic validation
         if not validate_environment():
             return {'status': 'unhealthy', 'reason': 'environment'}, 503
         
-        # Test BigQuery connectivity
-        bq_client = bigquery.Client()
-        bq_client.query("SELECT 1").result()
+        # Test BigQuery connectivity if PROJECT_ID is available
+        if PROJECT_ID:
+            bq_client = bigquery.Client()
+            bq_client.query("SELECT 1").result()
         
         return {
             'status': 'healthy',
             'environment': ENVIRONMENT,
+            'project_id': PROJECT_ID or 'not_set',
             'timestamp': datetime.utcnow().isoformat()
         }, 200
     except Exception as e:

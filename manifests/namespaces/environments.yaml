@@ -1,5 +1,5 @@
-# Namespace Definitions for YugabyteDB Multi-Cluster Deployment
-# Includes proper labels for network policies and security
+# Kubernetes Namespaces for YugabyteDB Multi-Cluster Environments
+# Creates isolated namespaces for each environment
 
 ---
 # Development Environment Namespace
@@ -9,23 +9,9 @@ metadata:
   name: codet-dev-yb
   labels:
     name: codet-dev-yb
-    environment: development
+    environment: dev
     cluster: codet-dev-yb
     pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/warn: restricted
-
----
-# Staging Environment Namespace
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: codet-staging-yb
-  labels:
-    name: codet-staging-yb
-    environment: staging
-    cluster: codet-staging-yb
-    pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 
@@ -37,7 +23,7 @@ metadata:
   name: codet-prod-yb
   labels:
     name: codet-prod-yb
-    environment: production
+    environment: prod
     cluster: codet-prod-yb
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted

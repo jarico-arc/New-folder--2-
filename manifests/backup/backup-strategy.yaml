@@ -3,7 +3,7 @@
 
 ---
 # Google Cloud Storage Bucket for Backups
-apiVersion: storage.cnrm.cloud.google.com/v1beta1
+apiVersion: storage.cnrm.cloud.google.com/v1
 kind: StorageBucket
 metadata:
   name: yugabytedb-backups

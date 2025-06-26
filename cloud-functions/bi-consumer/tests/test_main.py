@@ -9,7 +9,6 @@ import os
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 import sys
-import uuid
 
 # Add the parent directory to the path so we can import main
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

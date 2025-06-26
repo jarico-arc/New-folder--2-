@@ -1,0 +1,409 @@
+# YugabyteDB Backup Encryption Configuration
+# Addresses HIGH priority issue: Incomplete backup encryption configuration
+
+---
+# Google Cloud KMS Key Ring for Backup Encryption
+apiVersion: kms.cnrm.cloud.google.com/v1beta1
+kind: KMSKeyRing
+metadata:
+  name: yugabytedb-backup-keyring
+  namespace: backup
+spec:
+  location: global
+
+---
+# Google Cloud KMS Crypto Key for Backup Encryption
+apiVersion: kms.cnrm.cloud.google.com/v1beta1
+kind: KMSCryptoKey
+metadata:
+  name: backup-encryption-key
+  namespace: backup
+spec:
+  keyRingRef:
+    name: yugabytedb-backup-keyring
+  purpose: ENCRYPT_DECRYPT
+  rotationPeriod: 7776000s  # 90 days
+  versionTemplate:
+    algorithm: GOOGLE_SYMMETRIC_ENCRYPTION
+    protectionLevel: SOFTWARE
+
+---
+# Service Account for Backup Operations with KMS Access
+apiVersion: iam.cnrm.cloud.google.com/v1beta1
+kind: IAMServiceAccount
+metadata:
+  name: yugabytedb-backup-sa
+  namespace: backup
+spec:
+  displayName: "YugabyteDB Backup Service Account"
+  description: "Service account for YugabyteDB backup operations with KMS encryption"
+
+---
+# IAM Policy Binding for KMS Access
+apiVersion: iam.cnrm.cloud.google.com/v1beta1
+kind: IAMPolicyMember
+metadata:
+  name: backup-sa-kms-binding
+  namespace: backup
+spec:
+  member: serviceAccount:yugabytedb-backup-sa@PROJECT_ID.iam.gserviceaccount.com
+  role: roles/cloudkms.cryptoKeyEncrypterDecrypter
+  resourceRef:
+    apiVersion: kms.cnrm.cloud.google.com/v1beta1
+    kind: KMSCryptoKey
+    name: backup-encryption-key
+
+---
+# IAM Policy Binding for Storage Access
+apiVersion: iam.cnrm.cloud.google.com/v1beta1
+kind: IAMPolicyMember
+metadata:
+  name: backup-sa-storage-binding
+  namespace: backup
+spec:
+  member: serviceAccount:yugabytedb-backup-sa@PROJECT_ID.iam.gserviceaccount.com
+  role: roles/storage.objectAdmin
+  resourceRef:
+    apiVersion: storage.cnrm.cloud.google.com/v1
+    kind: StorageBucket
+    name: yugabytedb-backups
+
+---
+# Kubernetes Service Account with Workload Identity
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: yugabytedb-backup
+  namespace: backup
+  annotations:
+    iam.gke.io/gcp-service-account: yugabytedb-backup-sa@PROJECT_ID.iam.gserviceaccount.com
+
+---
+# Encrypted Backup Configuration Map
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-encryption-config
+  namespace: backup
+data:
+  kms-key-name: "projects/PROJECT_ID/locations/global/keyRings/yugabytedb-backup-keyring/cryptoKeys/backup-encryption-key"
+  encryption-enabled: "true"
+  backup-compression: "gzip"
+  backup-verification: "true"
+  backup-retention-policy: |
+    # Backup retention configuration
+    daily_backups_retention_days: 7
+    weekly_backups_retention_weeks: 4
+    monthly_backups_retention_months: 12
+    yearly_backups_retention_years: 7
+
+---
+# Enhanced Encrypted Backup CronJob for Production
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: yugabytedb-encrypted-backup-prod
+  namespace: backup
+  labels:
+    app: yugabytedb-backup
+    environment: production
+    backup-type: encrypted
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM UTC
+  timeZone: "UTC"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: yugabytedb-backup
+            environment: production
+        spec:
+          serviceAccountName: yugabytedb-backup
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          containers:
+          - name: encrypted-backup
+            image: google/cloud-sdk:alpine
+            imagePullPolicy: IfNotPresent
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities:
+                drop:
+                - ALL
+            env:
+            - name: BACKUP_DATE
+              value: "$(date +%Y%m%d-%H%M%S)"
+            - name: GCS_BUCKET
+              value: "yugabytedb-backups"
+            - name: ENVIRONMENT
+              value: "production"
+            - name: NAMESPACE
+              value: "codet-prod-yb"
+            - name: KMS_KEY_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-encryption-config
+                  key: kms-key-name
+            - name: ENCRYPTION_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: backup-encryption-config
+                  key: encryption-enabled
+            volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: backup-scripts
+              mountPath: /scripts
+              readOnly: true
+            command:
+            - /bin/bash
+            - /scripts/encrypted-backup.sh
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "500m"
+              limits:
+                memory: "2Gi"
+                cpu: "1000m"
+          volumes:
+          - name: tmp
+            emptyDir: {}
+          - name: backup-scripts
+            configMap:
+              name: encrypted-backup-scripts
+              defaultMode: 0755
+
+---
+# Encrypted Backup Scripts ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: encrypted-backup-scripts
+  namespace: backup
+data:
+  encrypted-backup.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    
+    # Configuration
+    BACKUP_DATE=${BACKUP_DATE:-$(date +%Y%m%d-%H%M%S)}
+    GCS_BUCKET=${GCS_BUCKET:-"yugabytedb-backups"}
+    ENVIRONMENT=${ENVIRONMENT:-"production"}
+    NAMESPACE=${NAMESPACE:-"codet-prod-yb"}
+    KMS_KEY_NAME=${KMS_KEY_NAME:-""}
+    ENCRYPTION_ENABLED=${ENCRYPTION_ENABLED:-"true"}
+    
+    # Logging function
+    log() {
+        echo "$(date '+%Y-%m-%d %H:%M:%S') - $*"
+    }
+    
+    log "Starting encrypted YugabyteDB backup - Environment: $ENVIRONMENT, Date: $BACKUP_DATE"
+    
+    # Validate KMS key
+    if [ "$ENCRYPTION_ENABLED" = "true" ] && [ -z "$KMS_KEY_NAME" ]; then
+        log "ERROR: KMS key name not specified but encryption is enabled"
+        exit 1
+    fi
+    
+    # Create backup directory
+    BACKUP_DIR="/tmp/yugabytedb-backup-$BACKUP_DATE"
+    mkdir -p "$BACKUP_DIR"
+    
+    # Function to create encrypted snapshot backup
+    create_encrypted_backup() {
+        local namespace=$1
+        local backup_type=${2:-"full"}
+        
+        log "Creating encrypted backup for namespace: $namespace (type: $backup_type)"
+        
+        # Check if namespace exists
+        if ! kubectl get namespace "$namespace" >/dev/null 2>&1; then
+            log "WARNING: Namespace $namespace not found, skipping"
+            return
+        fi
+        
+        # Get master pod for backup operations
+        local master_pod=$(kubectl get pods -n "$namespace" -l app=yb-master --no-headers -o custom-columns=":metadata.name" | head -1)
+        if [ -z "$master_pod" ]; then
+            log "ERROR: No master pod found in namespace $namespace"
+            return 1
+        fi
+        
+        log "Using master pod: $master_pod"
+        
+        # Create YugabyteDB snapshot
+        local snapshot_id="backup-${namespace}-${BACKUP_DATE}"
+        kubectl exec -n "$namespace" "$master_pod" -- \
+            yb-admin --master_addresses=yb-master-0.yb-masters.${namespace}.svc.cluster.local:7100 \
+            create_snapshot ysql.yugabyte "$snapshot_id" || {
+            log "ERROR: Failed to create snapshot for $namespace"
+            return 1
+        }
+        
+        log "Created snapshot: $snapshot_id"
+        
+        # Export snapshot data
+        local export_dir="$BACKUP_DIR/$namespace"
+        mkdir -p "$export_dir"
+        
+        # Export YSQL data
+        kubectl exec -n "$namespace" "$master_pod" -- \
+            ysql_dump -h yb-tserver-0.yb-tservers.${namespace}.svc.cluster.local -p 5433 \
+            -U yugabyte yugabyte > "$export_dir/ysql_dump.sql" || {
+            log "WARNING: YSQL dump failed for $namespace"
+        }
+        
+        # Export YCQL data  
+        kubectl exec -n "$namespace" "$master_pod" -- \
+            ycqlsh yb-tserver-0.yb-tservers.${namespace}.svc.cluster.local 9042 \
+            -e "DESCRIBE KEYSPACES;" > "$export_dir/ycql_schema.cql" || {
+            log "WARNING: YCQL schema export failed for $namespace"
+        }
+        
+        # Create compressed archive
+        local archive_name="${namespace}-backup-${BACKUP_DATE}.tar.gz"
+        tar -czf "/tmp/$archive_name" -C "$BACKUP_DIR" "$namespace"
+        
+        # Upload with encryption to GCS
+        if [ "$ENCRYPTION_ENABLED" = "true" ]; then
+            log "Uploading encrypted backup to GCS with KMS key: $KMS_KEY_NAME"
+            gsutil -o "GSUtil:encryption_key=$KMS_KEY_NAME" \
+                cp "/tmp/$archive_name" "gs://$GCS_BUCKET/encrypted/$ENVIRONMENT/"
+        else
+            log "Uploading backup to GCS without encryption"
+            gsutil cp "/tmp/$archive_name" "gs://$GCS_BUCKET/$ENVIRONMENT/"
+        fi
+        
+        # Verify upload
+        if gsutil ls "gs://$GCS_BUCKET/*/$ENVIRONMENT/$archive_name" >/dev/null 2>&1; then
+            log "SUCCESS: Backup uploaded successfully - $archive_name"
+        else
+            log "ERROR: Backup upload failed - $archive_name"
+            return 1
+        fi
+        
+        # Clean up local files
+        rm -f "/tmp/$archive_name"
+        rm -rf "$export_dir"
+        
+        # Clean up old snapshots (keep last 7 days)
+        kubectl exec -n "$namespace" "$master_pod" -- \
+            yb-admin --master_addresses=yb-master-0.yb-masters.${namespace}.svc.cluster.local:7100 \
+            list_snapshots | awk '/backup-/ && $3 < "'$(date -d '7 days ago' +%Y%m%d)'" {print $1}' | \
+            xargs -I {} kubectl exec -n "$namespace" "$master_pod" -- \
+            yb-admin --master_addresses=yb-master-0.yb-masters.${namespace}.svc.cluster.local:7100 \
+            delete_snapshot {} || log "WARNING: Failed to clean up old snapshots"
+        
+        log "Completed encrypted backup for $namespace"
+    }
+    
+    # Backup production namespace
+    create_encrypted_backup "$NAMESPACE" "full"
+    
+    # Clean up backup directory
+    rm -rf "$BACKUP_DIR"
+    
+    # Send success notification
+    log "Encrypted backup completed successfully for $ENVIRONMENT environment"
+    
+    # Optionally send to monitoring/alerting system
+    if command -v curl >/dev/null 2>&1; then
+        curl -X POST "http://webhook-service.monitoring.svc.cluster.local:5001/backup-success" \
+            -H "Content-Type: application/json" \
+            -d "{\"environment\":\"$ENVIRONMENT\",\"backup_date\":\"$BACKUP_DATE\",\"status\":\"success\"}" || true
+    fi
+
+---
+# Backup Restoration Job Template
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: yugabytedb-restore-template
+  namespace: backup
+  labels:
+    app: yugabytedb-restore
+spec:
+  template:
+    metadata:
+      labels:
+        app: yugabytedb-restore
+    spec:
+      serviceAccountName: yugabytedb-backup
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+      - name: restore
+        image: google/cloud-sdk:alpine
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        env:
+        - name: RESTORE_DATE
+          value: "REPLACE_WITH_BACKUP_DATE"
+        - name: SOURCE_ENVIRONMENT
+          value: "REPLACE_WITH_SOURCE_ENV"
+        - name: TARGET_NAMESPACE
+          value: "REPLACE_WITH_TARGET_NAMESPACE"
+        - name: KMS_KEY_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: backup-encryption-config
+              key: kms-key-name
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: restore-scripts
+          mountPath: /scripts
+          readOnly: true
+        command:
+        - /bin/bash
+        - /scripts/restore-encrypted-backup.sh
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: restore-scripts
+        configMap:
+          name: encrypted-backup-scripts
+          defaultMode: 0755
+
+---
+# Backup Monitoring ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: backup-monitoring
+  namespace: backup
+spec:
+  selector:
+    matchLabels:
+      app: yugabytedb-backup
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics 

@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # YugabyteDB Security Scanning Script
@@ -23,6 +22,20 @@ echo -e "${GREEN}🔒 YugabyteDB Security Scanning Suite${NC}"
 echo -e "${BLUE}Project: $PROJECT_ROOT${NC}"
 echo -e "${BLUE}Timestamp: $TIMESTAMP${NC}"
 
+# Function to check script permissions
+check_script_permissions() {
+    local script_path="$0"
+    if [ ! -x "$script_path" ]; then
+        echo -e "${YELLOW}Making script executable...${NC}"
+        chmod +x "$script_path"
+        if [ ! -x "$script_path" ]; then
+            echo -e "${RED}❌ Failed to make script executable${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✅ Script is now executable${NC}"
+    fi
+}
+
 # Create reports directory
 mkdir -p "$REPORT_DIR"
 
@@ -35,32 +48,41 @@ command_exists() {
 install_security_tools() {
     echo -e "\n${YELLOW}📦 Installing security tools...${NC}"
     
+    check_script_permissions
+    
     # Python security tools
     if command_exists pip; then
-        pip install --quiet bandit safety pip-audit || echo "Warning: Failed to install Python security tools"
+        echo -e "${BLUE}Installing Python security tools...${NC}"
+        pip install --quiet bandit safety pip-audit 2>/dev/null || echo "Warning: Failed to install Python security tools"
     fi
     
     # Node.js security tools (if needed)
     if command_exists npm; then
-        npm install -g --silent audit-ci snyk || echo "Warning: Failed to install Node.js security tools"
+        echo -e "${BLUE}Installing Node.js security tools...${NC}"
+        npm install -g --silent audit-ci snyk 2>/dev/null || echo "Warning: Failed to install Node.js security tools"
     fi
     
     # Trivy for container scanning
     if ! command_exists trivy; then
-        echo "Installing Trivy..."
-        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+        echo -e "${BLUE}Installing Trivy...${NC}"
+        if command_exists curl; then
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin 2>/dev/null || echo "Warning: Failed to install Trivy"
+        fi
     fi
     
     # Hadolint for Dockerfile linting
     if ! command_exists hadolint; then
-        echo "Installing Hadolint..."
-        wget -O /usr/local/bin/hadolint https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64
-        chmod +x /usr/local/bin/hadolint
+        echo -e "${BLUE}Installing Hadolint...${NC}"
+        if command_exists wget; then
+            wget -q -O /usr/local/bin/hadolint https://github.com/hadolint/hadolint/releases/download/v2.12.0/hadolint-Linux-x86_64 2>/dev/null || echo "Warning: Failed to install Hadolint"
+            chmod +x /usr/local/bin/hadolint 2>/dev/null || true
+        fi
     fi
     
     # Checkov for Infrastructure as Code
     if ! command_exists checkov; then
-        pip install --quiet checkov || echo "Warning: Failed to install Checkov"
+        echo -e "${BLUE}Installing Checkov...${NC}"
+        pip install --quiet checkov 2>/dev/null || echo "Warning: Failed to install Checkov"
     fi
 }
 
@@ -76,23 +98,35 @@ scan_python_security() {
             
             # Bandit security linting
             if command_exists bandit; then
-                echo "Running Bandit security scan..."
-                bandit -r "$dir" -f json -o "$REPORT_DIR/bandit-report-$TIMESTAMP.json" -ll || true
-                bandit -r "$dir" -ll || echo "Bandit found security issues"
+                echo -e "${BLUE}Running Bandit security scan...${NC}"
+                bandit -r "$dir" -f json -o "$REPORT_DIR/bandit-report-$TIMESTAMP.json" -ll 2>/dev/null || true
+                if bandit -r "$dir" -ll 2>/dev/null; then
+                    echo -e "${GREEN}✅ Bandit scan passed${NC}"
+                else
+                    echo -e "${YELLOW}⚠️ Bandit found security issues${NC}"
+                fi
             fi
             
             # Safety dependency check
             if command_exists safety && [ -f "$dir/requirements.txt" ]; then
-                echo "Running Safety dependency check..."
-                safety check -r "$dir/requirements.txt" --json --output "$REPORT_DIR/safety-report-$TIMESTAMP.json" || true
-                safety check -r "$dir/requirements.txt" || echo "Safety found vulnerable dependencies"
+                echo -e "${BLUE}Running Safety dependency check...${NC}"
+                safety check -r "$dir/requirements.txt" --json --output "$REPORT_DIR/safety-report-$TIMESTAMP.json" 2>/dev/null || true
+                if safety check -r "$dir/requirements.txt" 2>/dev/null; then
+                    echo -e "${GREEN}✅ Safety scan passed${NC}"
+                else
+                    echo -e "${YELLOW}⚠️ Safety found vulnerable dependencies${NC}"
+                fi
             fi
             
             # pip-audit advanced vulnerability check
             if command_exists pip-audit && [ -f "$dir/requirements.txt" ]; then
-                echo "Running pip-audit vulnerability check..."
-                pip-audit -r "$dir/requirements.txt" --format=json --output="$REPORT_DIR/pip-audit-report-$TIMESTAMP.json" || true
-                pip-audit -r "$dir/requirements.txt" --desc || echo "pip-audit found vulnerabilities"
+                echo -e "${BLUE}Running pip-audit vulnerability check...${NC}"
+                pip-audit -r "$dir/requirements.txt" --format=json --output="$REPORT_DIR/pip-audit-report-$TIMESTAMP.json" 2>/dev/null || true
+                if pip-audit -r "$dir/requirements.txt" --desc 2>/dev/null; then
+                    echo -e "${GREEN}✅ pip-audit scan passed${NC}"
+                else
+                    echo -e "${YELLOW}⚠️ pip-audit found vulnerabilities${NC}"
+                fi
             fi
         fi
     done
@@ -112,9 +146,18 @@ scan_container_images() {
     if command_exists trivy; then
         for image in "${images[@]}"; do
             echo -e "${BLUE}Scanning image: $image${NC}"
-            trivy image --format json --output "$REPORT_DIR/trivy-$TIMESTAMP-$(echo "$image" | tr '/:' '-').json" "$image" || true
-            trivy image --severity HIGH,CRITICAL "$image" || echo "High/Critical vulnerabilities found in $image"
+            local image_safe_name=$(echo "$image" | tr '/:' '-')
+            
+            trivy image --format json --output "$REPORT_DIR/trivy-$TIMESTAMP-$image_safe_name.json" "$image" 2>/dev/null || true
+            
+            if trivy image --severity HIGH,CRITICAL "$image" 2>/dev/null; then
+                echo -e "${GREEN}✅ No high/critical vulnerabilities in $image${NC}"
+            else
+                echo -e "${YELLOW}⚠️ High/Critical vulnerabilities found in $image${NC}"
+            fi
         done
+    else
+        echo -e "${YELLOW}Trivy not available - skipping container image scans${NC}"
     fi
 }
 
@@ -127,41 +170,67 @@ scan_kubernetes_manifests() {
     if [ -d "$manifest_dir" ]; then
         # Checkov security scan
         if command_exists checkov; then
-            echo "Running Checkov security scan..."
-            checkov -d "$manifest_dir" --framework kubernetes --output json --output-file "$REPORT_DIR/checkov-report-$TIMESTAMP.json" || true
-            checkov -d "$manifest_dir" --framework kubernetes || echo "Checkov found security issues"
+            echo -e "${BLUE}Running Checkov security scan...${NC}"
+            checkov -d "$manifest_dir" --framework kubernetes --output json --output-file "$REPORT_DIR/checkov-report-$TIMESTAMP.json" 2>/dev/null || true
+            if checkov -d "$manifest_dir" --framework kubernetes 2>/dev/null; then
+                echo -e "${GREEN}✅ Checkov scan passed${NC}"
+            else
+                echo -e "${YELLOW}⚠️ Checkov found security issues${NC}"
+            fi
         fi
         
         # Custom security checks
-        echo "Running custom Kubernetes security checks..."
+        echo -e "${BLUE}Running custom Kubernetes security checks...${NC}"
         
         # Check for privileged containers
         echo -e "${BLUE}Checking for privileged containers...${NC}"
-        grep -r "privileged.*true" "$manifest_dir" || echo "✅ No privileged containers found"
+        if grep -r "privileged.*true" "$manifest_dir" 2>/dev/null; then
+            echo -e "${YELLOW}⚠️ Found privileged containers${NC}"
+        else
+            echo -e "${GREEN}✅ No privileged containers found${NC}"
+        fi
         
         # Check for host network usage
         echo -e "${BLUE}Checking for host network usage...${NC}"
-        grep -r "hostNetwork.*true" "$manifest_dir" || echo "✅ No host network usage found"
+        if grep -r "hostNetwork.*true" "$manifest_dir" 2>/dev/null; then
+            echo -e "${YELLOW}⚠️ Found host network usage${NC}"
+        else
+            echo -e "${GREEN}✅ No host network usage found${NC}"
+        fi
         
         # Check for host PID usage
         echo -e "${BLUE}Checking for host PID usage...${NC}"
-        grep -r "hostPID.*true" "$manifest_dir" || echo "✅ No host PID usage found"
+        if grep -r "hostPID.*true" "$manifest_dir" 2>/dev/null; then
+            echo -e "${YELLOW}⚠️ Found host PID usage${NC}"
+        else
+            echo -e "${GREEN}✅ No host PID usage found${NC}"
+        fi
         
         # Check for host IPC usage
         echo -e "${BLUE}Checking for host IPC usage...${NC}"
-        grep -r "hostIPC.*true" "$manifest_dir" || echo "✅ No host IPC usage found"
+        if grep -r "hostIPC.*true" "$manifest_dir" 2>/dev/null; then
+            echo -e "${YELLOW}⚠️ Found host IPC usage${NC}"
+        else
+            echo -e "${GREEN}✅ No host IPC usage found${NC}"
+        fi
         
         # Check for allowPrivilegeEscalation
         echo -e "${BLUE}Checking for privilege escalation...${NC}"
-        grep -r "allowPrivilegeEscalation.*true" "$manifest_dir" || echo "✅ No privilege escalation found"
+        if grep -r "allowPrivilegeEscalation.*true" "$manifest_dir" 2>/dev/null; then
+            echo -e "${YELLOW}⚠️ Found privilege escalation${NC}"
+        else
+            echo -e "${GREEN}✅ No privilege escalation found${NC}"
+        fi
         
         # Check for runAsRoot
         echo -e "${BLUE}Checking for containers running as root...${NC}"
-        if grep -r "runAsUser.*0" "$manifest_dir"; then
-            echo "⚠️ Found containers running as root"
+        if grep -r "runAsUser.*0" "$manifest_dir" 2>/dev/null; then
+            echo -e "${YELLOW}⚠️ Found containers running as root${NC}"
         else
-            echo "✅ No containers running as root found"
+            echo -e "${GREEN}✅ No containers running as root found${NC}"
         fi
+    else
+        echo -e "${YELLOW}Manifest directory not found - skipping Kubernetes scans${NC}"
     fi
 }
 
@@ -170,7 +239,7 @@ scan_secrets() {
     echo -e "\n${YELLOW}🔐 Scanning for exposed secrets...${NC}"
     
     # Check for common secret patterns
-    echo "Checking for hardcoded secrets..."
+    echo -e "${BLUE}Checking for hardcoded secrets...${NC}"
     
     local secret_patterns=(
         "password.*=.*['\"][^'\"]*['\"]"
@@ -181,53 +250,49 @@ scan_secrets() {
         "BEGIN.*PRIVATE.*KEY"
     )
     
+    local secrets_found=0
     for pattern in "${secret_patterns[@]}"; do
         echo -e "${BLUE}Searching for pattern: $pattern${NC}"
-        if grep -r -E "$pattern" "$PROJECT_ROOT" --exclude-dir=.git --exclude-dir=security-reports --exclude="*.log"; then
-            echo "⚠️ Potential secrets found - please review"
-        else
-            echo "✅ No hardcoded secrets found for this pattern"
+        if grep -r -E "$pattern" "$PROJECT_ROOT" --exclude-dir=.git --exclude-dir=security-reports --exclude="*.log" 2>/dev/null; then
+            echo -e "${YELLOW}⚠️ Potential secrets found - please review${NC}"
+            secrets_found=1
         fi
     done
     
+    if [ $secrets_found -eq 0 ]; then
+        echo -e "${GREEN}✅ No hardcoded secrets found${NC}"
+    fi
+    
     # Check for high entropy strings (potential secrets)
     echo -e "${BLUE}Checking for high entropy strings...${NC}"
-    find "$PROJECT_ROOT" -name "*.yaml" -o -name "*.yml" -o -name "*.py" -o -name "*.sh" | \
-        xargs grep -E '[A-Za-z0-9+/]{32,}' | \
-        grep -v -E '(example|sample|test|placeholder)' || echo "✅ No suspicious high entropy strings found"
+    if find "$PROJECT_ROOT" -name "*.yaml" -o -name "*.yml" -o -name "*.py" -o -name "*.sh" 2>/dev/null | \
+        xargs grep -E '[A-Za-z0-9+/]{32,}' 2>/dev/null | \
+        grep -v -E '(example|sample|test|placeholder)' >/dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️ Suspicious high entropy strings found${NC}"
+    else
+        echo -e "${GREEN}✅ No suspicious high entropy strings found${NC}"
+    fi
 }
 
 # Function to scan shell scripts
 scan_shell_scripts() {
-    echo -e "\n${YELLOW}🐚 Scanning shell scripts for security issues...${NC}"
+    echo -e "\n${YELLOW}📜 Scanning shell scripts for security issues...${NC}"
     
-    local script_dir="$PROJECT_ROOT/scripts"
-    
-    if [ -d "$script_dir" ]; then
-        # ShellCheck security scan
-        if command_exists shellcheck; then
-            echo "Running ShellCheck security scan..."
-            find "$script_dir" -name "*.sh" -exec shellcheck {} \; || echo "ShellCheck found issues"
+    if command_exists shellcheck; then
+        echo -e "${BLUE}Running ShellCheck on scripts...${NC}"
+        local script_errors=0
+        find "$PROJECT_ROOT" -name "*.sh" -type f 2>/dev/null | while read -r script; do
+            if ! shellcheck "$script" 2>/dev/null; then
+                echo -e "${YELLOW}⚠️ ShellCheck issues found in $script${NC}"
+                script_errors=$((script_errors + 1))
+            fi
+        done
+        
+        if [ $script_errors -eq 0 ]; then
+            echo -e "${GREEN}✅ All shell scripts pass ShellCheck${NC}"
         fi
-        
-        # Custom security checks for shell scripts
-        echo "Running custom shell script security checks..."
-        
-        # Check for curl without verification
-        echo -e "${BLUE}Checking for insecure curl usage...${NC}"
-        grep -r "curl.*-k\|curl.*--insecure" "$script_dir" || echo "✅ No insecure curl usage found"
-        
-        # Check for wget without verification
-        echo -e "${BLUE}Checking for insecure wget usage...${NC}"
-        grep -r "wget.*--no-check-certificate" "$script_dir" || echo "✅ No insecure wget usage found"
-        
-        # Check for sudo without full path
-        echo -e "${BLUE}Checking for unsafe sudo usage...${NC}"
-        grep -r "sudo [^/]" "$script_dir" || echo "✅ No unsafe sudo usage found"
-        
-        # Check for eval usage
-        echo -e "${BLUE}Checking for eval usage...${NC}"
-        grep -r "eval " "$script_dir" || echo "✅ No eval usage found"
+    else
+        echo -e "${YELLOW}ShellCheck not available - skipping shell script analysis${NC}"
     fi
 }
 

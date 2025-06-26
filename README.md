@@ -8,15 +8,14 @@ Enterprise-grade multi-cluster YugabyteDB deployment on Google Kubernetes Engine
 
 ## 🏗️ Architecture Overview
 
-This project deploys **3 YugabyteDB clusters** across multiple GCP regions in a multi-cluster configuration:
+This project deploys **2 YugabyteDB clusters** across multiple GCP regions in a multi-cluster configuration:
 
 - **Codet-Dev-YB**: Development cluster in `us-west1-b`
-- **Codet-Staging-YB**: Staging cluster in `us-central1-b`  
 - **Codet-Prod-YB**: Production cluster in `us-east1-b`
 
 ### Key Features
 
-✅ **Multi-Cluster Architecture**: 3 clusters with cross-region replication  
+✅ **Multi-Cluster Architecture**: 2 clusters with cross-region capabilities  
 ✅ **Private VPC Networking**: No public IPs, internal load balancers only  
 ✅ **Enterprise Security**: TLS encryption, RBAC, Pod Security Standards  
 ✅ **Automated Backups**: Scheduled backups with encryption  
@@ -50,7 +49,7 @@ helm repo update
 ### 2. Deploy Multi-Cluster Setup
 
 ```bash
-# Complete deployment (all 3 clusters)
+# Complete deployment (both clusters)
 make multi-cluster-deploy
 
 # Or step-by-step deployment
@@ -76,8 +75,7 @@ make multi-cluster-info
 
 | Environment | Region | Nodes | CPU/RAM | Storage | Security | Backup |
 |-------------|--------|-------|---------|---------|----------|---------|
-| **Development** | us-west1 | 1 | 2C/4GB | 100GB SSD | Basic | Disabled |
-| **Staging** | us-central1 | 2 | 3C/6GB | 200GB SSD | Auth + RBAC | Daily |
+| **Development** | us-west1 | 2 | 2C/4GB | 100GB SSD | Basic | Disabled |
 | **Production** | us-east1 | 3 | 4C/8GB | 500GB SSD | Full TLS + Audit | Daily + Encrypted |
 
 ## 🌐 Network Architecture
@@ -86,7 +84,6 @@ make multi-cluster-info
 - **VPC**: `yugabytedb-private-vpc`
 - **Subnets**: 
   - Dev: `10.1.0.0/16` (us-west1)
-  - Staging: `10.2.0.0/16` (us-central1)
   - Production: `10.3.0.0/16` (us-east1)
 
 ### Security Features
@@ -103,12 +100,11 @@ make multi-cluster-info
 ```bash
 # Switch between environments
 make context-dev        # Development
-make context-staging    # Staging
 make context-prod       # Production
 
 # Database access
 make ysql-dev          # PostgreSQL-compatible interface
-make ycql-staging      # Cassandra-compatible interface
+make ycql-prod         # Cassandra-compatible interface
 
 # Monitoring
 make logs-prod         # View logs
@@ -118,9 +114,6 @@ make multi-cluster-status  # Check health
 ### Scaling Operations
 
 ```bash
-# Scale staging cluster
-make scale-staging
-
 # Scale production cluster  
 make scale-prod
 
@@ -135,7 +128,6 @@ helm upgrade codet-prod-yb yugabytedb/yugabyte \
 
 ### Authentication & Authorization
 - **Development**: Open access for development ease
-- **Staging**: Basic authentication enabled
 - **Production**: Full RBAC + TLS + audit logging
 
 ### Network Security
@@ -165,7 +157,6 @@ All clusters expose metrics for monitoring:
 ```bash
 # View logs by environment
 make logs-dev
-make logs-staging  
 make logs-prod
 
 # Follow logs in real-time
@@ -185,7 +176,6 @@ make multi-cluster-status
 ## 💾 Backup & Recovery
 
 ### Automated Backups
-- **Staging**: Daily at 3 AM UTC, 7-day retention
 - **Production**: Daily at 2 AM UTC, 30-day retention with encryption
 
 ### Manual Backup
@@ -202,7 +192,6 @@ kubectl exec -n codet-prod-yb yb-master-0 -- \
 ```
 
 ### Backup Locations
-- **Staging**: `gs://codet-staging-yb-backups`
 - **Production**: `gs://codet-prod-yb-backups`
 
 ## 🛠️ Troubleshooting
@@ -223,7 +212,7 @@ kubectl top pods -n codet-dev-yb
 ```bash
 # Test internal DNS
 kubectl exec -n codet-dev-yb yb-master-0 -- \
-  nslookup yb-master-0.yb-masters.codet-staging-yb.svc.cluster.local
+  nslookup yb-master-0.yb-masters.codet-prod-yb.svc.cluster.local
 
 # Check network policies
 kubectl get networkpolicy -n codet-dev-yb
@@ -261,12 +250,9 @@ kubectl rollout status statefulset/yb-master -n codet-dev-yb
 ├── manifests/
 │   ├── clusters/                              # Cluster configurations
 │   │   ├── codet-dev-yb-cluster.yaml
-│   │   ├── codet-staging-yb-cluster.yaml
 │   │   └── codet-prod-yb-cluster.yaml
 │   ├── values/
 │   │   └── multi-cluster/                     # Helm override files
-│   │       ├── overrides-codet-dev-yb.yaml
-│   │       ├── overrides-codet-staging-yb.yaml
 │   │       └── overrides-codet-prod-yb.yaml
 │   ├── monitoring/                            # Monitoring configs
 │   ├── backup/                                # Backup strategies
@@ -305,12 +291,11 @@ The project includes a comprehensive GitHub Actions pipeline:
 
 ### Resource Allocation
 - **Development**: Minimal resources for cost efficiency
-- **Staging**: Moderate resources for realistic testing
 - **Production**: High-performance configuration with HA
 
 ### Storage Optimization
 - Regional SSD persistent disks for production
-- Standard SSD for development and staging
+- Standard SSD for development
 - Automatic volume expansion enabled
 
 ## 🔐 Compliance & Standards

@@ -159,10 +159,15 @@ jobs:
       
       - name: Lint Helm values
         run: |
-          # Test YugabyteDB multi-cluster values files
-          helm lint --values manifests/values/multi-cluster/overrides-codet-dev-yb.yaml yugabytedb/yugabyte || true
-          helm lint --values manifests/values/multi-cluster/overrides-codet-staging-yb.yaml yugabytedb/yugabyte || true
-          helm lint --values manifests/values/multi-cluster/overrides-codet-prod-yb.yaml yugabytedb/yugabyte || true
+          # Test YugabyteDB multi-cluster values files (only existing files)
+          if [ -f "manifests/values/multi-cluster/overrides-codet-dev-yb.yaml" ]; then
+            echo "Testing dev values file..."
+            helm lint --values manifests/values/multi-cluster/overrides-codet-dev-yb.yaml yugabytedb/yugabyte || true
+          fi
+          if [ -f "manifests/values/multi-cluster/overrides-codet-prod-yb.yaml" ]; then
+            echo "Testing prod values file..."
+            helm lint --values manifests/values/multi-cluster/overrides-codet-prod-yb.yaml yugabytedb/yugabyte || true
+          fi
 
   docker-security:
     name: Docker Security Scan
@@ -200,4 +205,29 @@ jobs:
       - name: Upload Checkov scan results
         uses: github/codeql-action/upload-sarif@v2
         with:
-          sarif_file: reports/checkov-results.sarif 
+          sarif_file: reports/checkov-results.sarif
+
+  api-deprecation-check:
+    name: Check for Deprecated APIs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Pluto
+        run: |
+          curl -L https://github.com/FairwindsOps/pluto/releases/download/v5.18.4/pluto_5.18.4_linux_amd64.tar.gz | tar -xz
+          sudo mv pluto /usr/local/bin/
+      
+      - name: Check for deprecated APIs
+        run: |
+          pluto detect-files -d manifests/ --target-versions k8s=v1.29.0
+          if [ $? -ne 0 ]; then
+            echo "❌ Deprecated APIs found! Please update to stable versions."
+            exit 1
+          fi
+          echo "✅ No deprecated APIs found"
+      
+      - name: Check for deprecated Docker images
+        run: |
+          # Check for deprecated base images
+          find . -name "*.yaml" -o -name "*.yml" | xargs grep -E "image:.*:(latest|alpine)$" || echo "✅ No latest/alpine tags found" 

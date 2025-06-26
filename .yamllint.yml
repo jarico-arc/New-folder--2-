@@ -1,5 +1,6 @@
 # YAML Linting Rules for YugabyteDB Project
 # Configuration for yamllint to ensure consistent YAML formatting
+# Updated for enhanced security and consistency
 
 extends: default
 
@@ -29,24 +30,26 @@ rules:
 
   # Allow truthy values common in Kubernetes
   truthy:
-    allowed-values: ['true', 'false', 'yes', 'no']
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
     check-keys: false
 
   # Allow long lines in comments for URLs and examples
   comments-indentation: disable
 
-  # Allow document separators (---)
-  document-start: disable
+  # Require document separators for multi-document files
+  document-start:
+    present: true
+    level: warning
 
   # Allow multiple documents in one file
   document-end: disable
 
-  # Allow empty values in Kubernetes manifests
+  # Be strict about empty values in security contexts
   empty-values:
-    forbid-in-block-mappings: false
-    forbid-in-flow-mappings: false
+    forbid-in-block-mappings: true
+    forbid-in-flow-mappings: true
 
-  # Allow key duplicates in some cases (common in Kubernetes)
+  # Prevent key duplicates (important for security)
   key-duplicates: enable
 
   # Allow octal values (common in file permissions)
@@ -54,10 +57,10 @@ rules:
     forbid-implicit-octal: false
     forbid-explicit-octal: false
 
-  # Allow quoted strings
+  # Be more strict about quoted strings
   quoted-strings:
     quote-type: any
-    required: false
+    required: only-when-needed
 
   # Allow braces
   braces:
@@ -69,37 +72,39 @@ rules:
     min-spaces-inside: 0
     max-spaces-inside: 1
 
-  # Allow colons
+  # Strict colons
   colons:
-    max-spaces-after: -1
+    max-spaces-after: 1
     level: error
 
-  # Allow commas
+  # Strict commas
   commas:
-    max-spaces-after: -1
+    max-spaces-after: 1
     level: error
 
-  # Allow hyphens
+  # Strict hyphens
   hyphens:
     level: error
 
-  # Allow new line at end of file
-  new-line-at-end-of-file: disable
+  # Require new line at end of file
+  new-line-at-end-of-file: enable
 
-  # Allow trailing spaces
-  trailing-spaces: disable
+  # Disallow trailing spaces
+  trailing-spaces: enable
 
-  # Allow key ordering
+  # Allow key ordering flexibility
   key-ordering: disable
 
-  # Be more lenient with line endings for cross-platform compatibility
+  # Be strict with line endings for consistency
   new-lines:
     type: unix
-    level: warning
+    level: error
 
 ignore: |
   .git/
   .github/
   node_modules/
   *.md
-  credentials/ 
+  credentials/
+  security-reports/
+  .secrets/ 

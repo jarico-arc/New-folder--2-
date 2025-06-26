@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Multi-Cluster YugabyteDB Deployment Script
-# Creates 3 YugabyteDB clusters: Codet-Dev-YB, Codet-Staging-YB, Codet-Prod-YB
+# Creates 2 YugabyteDB clusters: Codet-Dev-YB, Codet-Prod-YB
 # Following: https://docs.yugabyte.com/preview/deploy/kubernetes/multi-cluster/gke/helm-chart/
 
 set -euo pipefail
@@ -16,27 +16,41 @@ NC='\033[0m'
 # Configuration
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 REGION_DEV="us-west1"
-REGION_STAGING="us-central1" 
 REGION_PROD="us-east1"
 ZONE_DEV="us-west1-b"
-ZONE_STAGING="us-central1-b"
 ZONE_PROD="us-east1-b"
 YUGABYTE_VERSION="2.25.2"
 
-# Cluster configurations
+# Cluster configurations (staging removed)
 CLUSTERS=(
     "codet-dev-yb:${REGION_DEV}:${ZONE_DEV}:dev"
-    "codet-staging-yb:${REGION_STAGING}:${ZONE_STAGING}:staging"
     "codet-prod-yb:${REGION_PROD}:${ZONE_PROD}:prod"
 )
 
 echo -e "${GREEN}🚀 Multi-Cluster YugabyteDB Deployment${NC}"
 echo -e "${BLUE}Project: ${PROJECT_ID}${NC}"
 echo -e "${BLUE}YugabyteDB Version: ${YUGABYTE_VERSION}${NC}"
+echo -e "${BLUE}Clusters: ${#CLUSTERS[@]}${NC}"
+
+# Function to check script permissions
+check_script_permissions() {
+    local script_path="$0"
+    if [ ! -x "$script_path" ]; then
+        echo -e "${YELLOW}Making script executable...${NC}"
+        chmod +x "$script_path"
+        if [ ! -x "$script_path" ]; then
+            echo -e "${RED}❌ Failed to make script executable${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✅ Script is now executable${NC}"
+    fi
+}
 
 # Function to check prerequisites
 check_prerequisites() {
     echo -e "\n${YELLOW}📋 Checking prerequisites...${NC}"
+    
+    check_script_permissions
     
     local missing=0
     for cmd in gcloud kubectl helm; do
@@ -56,6 +70,12 @@ check_prerequisites() {
     # Check if user is authenticated
     if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" | head -n1 > /dev/null; then
         echo -e "${RED}❌ Please authenticate with gcloud: gcloud auth login${NC}"
+        exit 1
+    fi
+    
+    # Check if PROJECT_ID is set
+    if [ -z "$PROJECT_ID" ]; then
+        echo -e "${RED}❌ GCP project not set. Run: gcloud config set project YOUR_PROJECT_ID${NC}"
         exit 1
     fi
     
@@ -79,10 +99,10 @@ create_vpc_network() {
     fi
     
     # Create subnets for each environment with non-overlapping secondary ranges
+    # Fixed overlapping ranges issue by using properly spaced CIDR blocks
     local subnets=(
-        "dev-subnet:${REGION_DEV}:10.1.0.0/16:172.16.0.0/14:172.20.0.0/20"
-        "staging-subnet:${REGION_STAGING}:10.2.0.0/16:172.24.0.0/14:172.28.0.0/20"
-        "prod-subnet:${REGION_PROD}:10.3.0.0/16:172.32.0.0/14:172.36.0.0/20"
+        "dev-subnet:${REGION_DEV}:10.1.0.0/16:172.16.0.0/16:172.32.0.0/20"
+        "prod-subnet:${REGION_PROD}:10.3.0.0/16:172.48.0.0/16:172.64.0.0/20"
     )
     
     for subnet_config in "${subnets[@]}"; do
@@ -105,6 +125,7 @@ create_vpc_network() {
         "allow-yugabytedb-internal:10.0.0.0/8:tcp:7000,tcp:7100,tcp:9000,tcp:9100,tcp:5433,tcp:9042,tcp:6379"
         "allow-ssh-private:10.0.0.0/8:tcp:22"
         "allow-dns-private:10.0.0.0/8:tcp:53,udp:53"
+        "allow-health-checks:130.211.0.0/22,35.191.0.0/16:tcp:7000,tcp:9000"
     )
     
     for rule_config in "${firewall_rules[@]}"; do
@@ -145,10 +166,6 @@ create_gke_clusters() {
         if [ "$env" = "prod" ]; then
             node_count=3
             machine_type="e2-standard-8"
-            master_cidr="192.168.3.0/28"
-        elif [ "$env" = "staging" ]; then
-            node_count=2
-            machine_type="e2-standard-4"
             master_cidr="192.168.2.0/28"
         else # dev
             node_count=2 # Increased from 1 for monitoring stack
@@ -188,7 +205,10 @@ create_gke_clusters() {
             --node-labels=environment=$env,cluster=$cluster_name \
             --tags=yugabytedb,$env \
             --workload-pool=${PROJECT_ID}.svc.id.goog \
-            --release-channel=stable
+            --release-channel=stable \
+            --enable-autoscaling \
+            --min-nodes=1 \
+            --max-nodes=10
         
         # Get cluster credentials
         gcloud container clusters get-credentials $cluster_name --region=$region
@@ -198,8 +218,10 @@ create_gke_clusters() {
             "gke_${PROJECT_ID}_${region}_${cluster_name}" \
             "${cluster_name}-context"
         
-        echo -e "${GREEN}✅ Cluster $cluster_name created successfully${NC}"
+        echo -e "${GREEN}✅ Cluster $cluster_name created and configured${NC}"
     done
+    
+    echo -e "${GREEN}✅ All clusters created successfully${NC}"
 }
 
 # Function to authorize external IP for kubectl access
@@ -288,7 +310,6 @@ data:
   stubDomains: |
     {
       "codet-dev-yb.local": ["10.1.0.10"],
-      "codet-staging-yb.local": ["10.2.0.10"],
       "codet-prod-yb.local": ["10.3.0.10"]
     }
 EOF
@@ -365,12 +386,6 @@ create_override_files() {
             tserver_cpu="4000m"
             tserver_memory="8Gi"
             storage_size="500Gi"
-        elif [ "$env" = "staging" ]; then
-            master_cpu="1500m"
-            master_memory="3Gi"
-            tserver_cpu="3000m"
-            tserver_memory="6Gi"
-            storage_size="200Gi"
         fi
         
         # Create override file
@@ -502,13 +517,6 @@ domainName: codet-dev-yb.local
 image:
   tag: "2.25.2-b0"
 DEV_EOF
-elif [ "$env" = "staging" ]; then cat <<STAGING_EOF
-
-# Staging specific settings  
-domainName: codet-staging-yb.local
-image:
-  tag: "2.25.2"
-STAGING_EOF
 elif [ "$env" = "prod" ]; then cat <<PROD_EOF
 
 # Production specific settings
@@ -581,7 +589,7 @@ configure_replica_placement() {
     # Configure replica placement
     kubectl exec -it -n $first_cluster yb-master-0 -- bash -c \
         "/home/yugabyte/master/bin/yb-admin \
-        --master_addresses yb-master-0.yb-masters.codet-dev-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-staging-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-prod-yb.svc.cluster.local:7100 \
+        --master_addresses yb-master-0.yb-masters.codet-dev-yb.svc.cluster.local:7100,yb-master-0.yb-masters.codet-prod-yb.svc.cluster.local:7100 \
         modify_placement_info $placement_info 3"
     
     echo -e "${GREEN}✅ Region-aware replica placement configured${NC}"
@@ -663,9 +671,8 @@ main() {
     show_connection_info
     
     echo -e "\n${GREEN}🎉 Multi-cluster YugabyteDB deployment completed successfully!${NC}"
-    echo -e "${BLUE}You now have 3 YugabyteDB clusters running in private VPC:${NC}"
+    echo -e "${BLUE}You now have 2 YugabyteDB clusters running in private VPC:${NC}"
     echo -e "${GREEN}- Codet-Dev-YB (${REGION_DEV})${NC}"
-    echo -e "${GREEN}- Codet-Staging-YB (${REGION_STAGING})${NC}"
     echo -e "${GREEN}- Codet-Prod-YB (${REGION_PROD})${NC}"
 }
 

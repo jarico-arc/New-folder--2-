@@ -115,7 +115,7 @@ spec:
                 kubernetes_sd_configs:
                   - role: pod
                     namespaces:
-                      names: ['codet-dev-yb', 'codet-staging-yb', 'codet-prod-yb']
+                      names: ['codet-dev-yb', 'codet-prod-yb']
                 relabel_configs:
                   - source_labels: [__meta_kubernetes_pod_label_app]
                     action: keep
@@ -142,7 +142,7 @@ spec:
                 kubernetes_sd_configs:
                   - role: pod
                     namespaces:
-                      names: ['codet-dev-yb', 'codet-staging-yb', 'codet-prod-yb']
+                      names: ['codet-dev-yb', 'codet-prod-yb']
                 relabel_configs:
                   - source_labels: [__meta_kubernetes_pod_label_app]
                     action: keep
@@ -190,7 +190,7 @@ spec:
                 kubernetes_sd_configs:
                   - role: service
                     namespaces:
-                      names: ['codet-dev-yb', 'codet-staging-yb', 'codet-prod-yb']
+                      names: ['codet-dev-yb', 'codet-prod-yb']
                 relabel_configs:
                   - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
                     action: keep
@@ -350,9 +350,7 @@ spec:
       app: yb-masters
   namespaceSelector:
     matchNames:
-      - codet-dev-yb
-      - codet-staging-yb
-      - codet-prod-yb
+      names: ['codet-dev-yb', 'codet-prod-yb']
   endpoints:
   - port: ui
     path: /prometheus-metrics
@@ -375,9 +373,7 @@ spec:
       app: yb-tservers
   namespaceSelector:
     matchNames:
-      - codet-dev-yb
-      - codet-staging-yb
-      - codet-prod-yb
+      names: ['codet-dev-yb', 'codet-prod-yb']
   endpoints:
   - port: ui
     path: /prometheus-metrics

@@ -12,8 +12,7 @@ CLUSTER_NAME ?= yb-demo
 REGION ?= us-central1
 ENVIRONMENT ?= dev
 
-# Multi-cluster configuration
-# Note: Staging cluster temporarily removed per user request - can be re-added later
+# Multi-cluster configuration (staging cluster removed)
 CLUSTERS := codet-dev-yb codet-prod-yb
 REGIONS := us-west1 us-east1
 
@@ -36,7 +35,7 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*##/ { printf "  $(YELLOW)%-30s$(NC) %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 	@echo ""
 	@echo "$(BLUE)Multi-Cluster Examples:$(NC)"
-	@echo "  make multi-cluster-deploy       # Deploy all 3 clusters"
+	@echo "  make multi-cluster-deploy       # Deploy both dev and prod clusters"
 	@echo "  make multi-cluster-test          # Test multi-cluster setup"
 	@echo "  make multi-cluster-status        # Check status of all clusters"
 	@echo ""
@@ -47,7 +46,7 @@ help: ## Show this help message
 	@echo "  make security                    # Run security scans"
 
 # === MULTI-CLUSTER TARGETS ===
-multi-cluster-deploy: ## Deploy complete multi-cluster setup (3 environments)
+multi-cluster-deploy: ## Deploy complete multi-cluster setup (dev and prod environments)
 	@echo "$(GREEN)🚀 Starting multi-cluster deployment...$(NC)"
 	@chmod +x scripts/create-multi-cluster-yugabytedb.sh
 	@./scripts/create-multi-cluster-yugabytedb.sh all
@@ -105,16 +104,6 @@ deploy-dev: ## Deploy development cluster only
 		-f manifests/values/multi-cluster/overrides-codet-dev-yb.yaml \
 		--wait
 
-deploy-staging: ## Deploy staging cluster only
-	@echo "$(GREEN)Deploying staging cluster...$(NC)"
-	@kubectl config use-context codet-staging-yb-context || echo "Context not found"
-	@kubectl apply -f manifests/clusters/codet-staging-yb-cluster.yaml
-	@helm upgrade --install codet-staging-yb yugabytedb/yugabyte \
-		--namespace codet-staging-yb \
-		--create-namespace \
-		-f manifests/values/multi-cluster/overrides-codet-staging-yb.yaml \
-		--wait
-
 deploy-prod: ## Deploy production cluster only
 	@echo "$(GREEN)Deploying production cluster...$(NC)"
 	@kubectl config use-context codet-prod-yb-context || echo "Context not found"
@@ -129,23 +118,16 @@ deploy-prod: ## Deploy production cluster only
 context-dev: ## Switch to development cluster context
 	@kubectl config use-context codet-dev-yb-context
 
-context-staging: ## Switch to staging cluster context
-	@kubectl config use-context codet-staging-yb-context
-
 context-prod: ## Switch to production cluster context
 	@kubectl config use-context codet-prod-yb-context
 
 contexts: ## List all cluster contexts
-	@kubectl config get-contexts | grep -E "(codet-dev-yb|codet-staging-yb|codet-prod-yb)" || echo "No multi-cluster contexts found"
+	@kubectl config get-contexts | grep -E "(codet-dev-yb|codet-prod-yb)" || echo "No multi-cluster contexts found"
 
 # === DATABASE ACCESS ===
 ysql-dev: ## Connect to development YSQL
 	@kubectl config use-context codet-dev-yb-context
 	@kubectl exec -it -n codet-dev-yb yb-tserver-0 -- ysqlsh -h yb-tserver-0.yb-tservers.codet-dev-yb
-
-ysql-staging: ## Connect to staging YSQL
-	@kubectl config use-context codet-staging-yb-context
-	@kubectl exec -it -n codet-staging-yb yb-tserver-0 -- ysqlsh -h yb-tserver-0.yb-tservers.codet-staging-yb -U yugabyte
 
 ysql-prod: ## Connect to production YSQL
 	@kubectl config use-context codet-prod-yb-context
@@ -154,10 +136,6 @@ ysql-prod: ## Connect to production YSQL
 ycql-dev: ## Connect to development YCQL
 	@kubectl config use-context codet-dev-yb-context
 	@kubectl exec -it -n codet-dev-yb yb-tserver-0 -- ycqlsh yb-tserver-0.yb-tservers.codet-dev-yb
-
-ycql-staging: ## Connect to staging YCQL
-	@kubectl config use-context codet-staging-yb-context
-	@kubectl exec -it -n codet-staging-yb yb-tserver-0 -- ycqlsh yb-tserver-0.yb-tservers.codet-staging-yb -u yugabyte
 
 ycql-prod: ## Connect to production YCQL
 	@kubectl config use-context codet-prod-yb-context
